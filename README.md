@@ -107,5 +107,17 @@ to see if things are OK.
 Point your browser at
 https://katago-gui.herokuapp.com
 
+CURL testing
+------------------
+
+Prod:
+
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server/select-move/leela_gtp_bot
+
+Dev on marfa:
+
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2818/select-move/katago_gtp_bot
+
+
 
 === The End ===
