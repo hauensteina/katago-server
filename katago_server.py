@@ -19,9 +19,9 @@ from io import BytesIO
 import flask
 from flask import jsonify,request,Response,send_file
 
-import keras.models as kmod
-from keras import backend as K
-import tensorflow as tf
+#import keras.models as kmod
+#from keras import backend as K
+#import tensorflow as tf
 
 from gotypes import Point, Player
 from katago_gtp_bot import KataGTPBot

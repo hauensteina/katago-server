@@ -1,0 +1,3 @@
+[submodule "katago-gui"]
+	path = katago-gui
+	url = https://github.com/hauensteina/katago-gui.git

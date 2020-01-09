@@ -12,8 +12,8 @@ WARNING: You need the katago weights. Get them with
 $ cd katago-server
 $ wget https://github.com/lightvector/KataGo/releases/download/v1.1/g104-b20c256-s447913472-d241840887.zip
 
-To start the back end leela for testing, say
-gunicorn leela_server:app --bind 0.0.0.0:2818 -w 1
+To start the back end katago for testing, say
+gunicorn katago_server:app --bind 0.0.0.0:2818 -w 1
 
 The production port is 2819.
 
@@ -22,7 +22,7 @@ KATAGO_SERVER = 'https://ahaux.com/katago_server_test/'
 in heroku_app.py .
 
 The katago-gui GUI expects the back end at https://ahaux.com/katago_server .
-The apache2 config on ahaux.com (marfa) forwards leela-server to port 2819:
+The apache2 config on ahaux.com (marfa) forwards katago_server to port 2819:
 
 $ cat /etc/apache2/sites-available/ahaux.conf
 <VirtualHost *:443>
@@ -112,9 +112,13 @@ CURL testing
 
 Prod:
 
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server/select-move/leela_gtp_bot
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server/select-move/katago_gtp_bot
 
 Dev on marfa:
+
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server_test/select-move/katago_gtp_bot
+
+Dev local on marfa:
 
 $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2818/select-move/katago_gtp_bot
 
