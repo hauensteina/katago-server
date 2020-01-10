@@ -154,7 +154,9 @@ class KataGTPBot( Agent):
         g_win_prob = -1
         p = self.katago_proc
 
-        #randomness = config.get( 'randomness', 0.0)
+        komi = config.get( 'komi', 7.5)
+        self.set_komi( komi)
+
         #playouts = config.get( 'playouts', 0)
 
         # Reset the game
@@ -162,8 +164,9 @@ class KataGTPBot( Agent):
 
         # Make the moves
         color = 'b'
-        for move in moves:
-            self._katagoCmd( 'play %s %s' % (color, move))
+        for idx,move in enumerate(moves):
+            if move != 'pass' or idx > 20: # Early passes mess up the chinese handicap komi
+                self._katagoCmd( 'play %s %s' % (color, move))
             color = 'b' if color == 'w' else 'w'
 
         # Ask for new move
@@ -187,6 +190,11 @@ class KataGTPBot( Agent):
         g_response = None
         print( 'katago says: %s' % str(res))
         return res
+
+    #---------------------------
+    def set_komi( self, komi):
+        print( '>>>>>>>>> komi:%f',komi)
+        self._katagoCmd( 'komi %f' % komi)
 
     # Override Agent.diagnostics()
     #------------------------------
