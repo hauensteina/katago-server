@@ -108,6 +108,10 @@ class KataGTPBot( Agent):
                 g_response = self._resp2Move( resp)
                 if g_response:
                     g_response_event.set()
+        elif line.startswith('info '): # kata-analyze response
+            self._katagoCmd( 'stop')
+            g_response = line
+            g_response_event.set()
 
     # Resurrect a dead Katago
     #---------------------------
@@ -185,7 +189,35 @@ class KataGTPBot( Agent):
         print( 'response: ' + str(g_response))
         if g_response:
             res = g_response
-            print( '>>>>>>>>> cleared event')
+            print( '>>>>>>>>> clearing event')
+            g_response_event.clear()
+        g_response = None
+        print( 'katago says: %s' % str(res))
+        return res
+
+    # score endpoint implementation
+    #---------------------------------------------------
+    def score( self, game_state, moves, config = {}):
+        global g_response
+        global g_response_event
+        res = None
+        p = self.katago_proc
+
+        # Ask for the ownership info
+        self._katagoCmd( 'kata-analyze 100 ownership true')
+        # Hang until the info comes back
+        print( '>>>>>>>>> waiting for score')
+        success = g_response_event.wait( MOVE_TIMEOUT)
+        if not success: # I guess katago died
+            print( 'error: katago response timeout')
+            self._error_handler()
+            return None
+        print( 'score response: ' + str(g_response))
+        if g_response:
+            probs = g_response.split( 'ownership')[1]
+            probs = probs.split()
+            res = probs
+            print( '>>>>>>>>> clearing event')
             g_response_event.clear()
         g_response = None
         print( 'katago says: %s' % str(res))

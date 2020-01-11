@@ -19,6 +19,10 @@ class Agent:
     def select_move( self, game_state, moves=None, config={}):
         raise NotImplementedError()
 
+    #-----------------------------------------------------------
+    def score( self, game_state, moves=None, config={}):
+        raise NotImplementedError()
+
     #---------------------------
     def diagnostics( self):
         return {}
