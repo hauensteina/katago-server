@@ -203,6 +203,16 @@ class KataGTPBot( Agent):
         res = None
         p = self.katago_proc
 
+        # Reset the game
+        self._katagoCmd( 'clear_board')
+
+        # Make the moves
+        color = 'b'
+        for idx,move in enumerate(moves):
+            if move != 'pass' or idx > 20: # Early passes mess up the chinese handicap komi
+                self._katagoCmd( 'play %s %s' % (color, move))
+            color = 'b' if color == 'w' else 'w'
+
         # Ask for the ownership info
         self._katagoCmd( 'kata-analyze 100 ownership true')
         # Hang until the info comes back
