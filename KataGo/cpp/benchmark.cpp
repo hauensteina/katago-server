@@ -18,11 +18,13 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
   ScoreValue::initTables();
   Rand seedRand;
 
+  const int64_t defaultMaxVisits = 600;
+
   string configFile;
   string modelFile;
   string sgfFile;
   int boardSize;
-  int maxVisits;
+  int64_t maxVisits;
   string desiredThreadsStr;
   int numPositionsPerGame;
   try {
@@ -31,9 +33,9 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
     TCLAP::ValueArg<string> modelFileArg("","model","Neural net model file to use",true,string(),"FILE");
     TCLAP::ValueArg<string> sgfFileArg("","sgf", "Optional game to sample positions from (default: uses a built-in-set of positions)",false,string(),"FILE");
     TCLAP::ValueArg<int> boardSizeArg("","boardsize", "Size of board to benchmark on (9-19), default 19",false,-1,"SIZE");
-    TCLAP::ValueArg<int> visitsArg("v","visits","How many visits to use per search (default 1000)",false,1000,"VISITS");
+    TCLAP::ValueArg<long> visitsArg("v","visits","How many visits to use per search (default " + Global::int64ToString(defaultMaxVisits) + ")",false,(long)defaultMaxVisits,"VISITS");
     TCLAP::ValueArg<string> threadsArg("t","threads","Test using these many threads, comma-separated (default 1,2,4,6,8,12,16)",false,string("1,2,4,6,8,12,16"),"THREADS");
-    TCLAP::ValueArg<int> numPositionsPerGameArg("n","numpositions","How many positions to sample from a game (default 20)",false,20,"NUM");
+    TCLAP::ValueArg<int> numPositionsPerGameArg("n","numpositions","How many positions to sample from a game (default 10)",false,10,"NUM");
     cmd.add(configFileArg);
     cmd.add(modelFileArg);
     cmd.add(sgfFileArg);
@@ -46,7 +48,7 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
     modelFile = modelFileArg.getValue();
     sgfFile = sgfFileArg.getValue();
     boardSize = boardSizeArg.getValue();
-    maxVisits = visitsArg.getValue();
+    maxVisits = (int64_t)visitsArg.getValue();
     desiredThreadsStr = threadsArg.getValue();
     numPositionsPerGame = numPositionsPerGameArg.getValue();
   }
@@ -60,7 +62,7 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
   if(boardSize != -1 && (boardSize < 9 || boardSize > 19))
     throw StringError("Board size to test: invalid value " + Global::intToString(boardSize));
   if(maxVisits <= 1)
-    throw StringError("Number of visits to use: invalid value " + Global::intToString(maxVisits));
+    throw StringError("Number of visits to use: invalid value " + Global::int64ToString(maxVisits));
   if(numPositionsPerGame <= 0 || numPositionsPerGame > 100000)
     throw StringError("Number of positions per game to use: invalid value " + Global::intToString(numPositionsPerGame));
 
@@ -140,19 +142,8 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
   logger.setLogToStdout(true);
   logger.write("Loading model and initializing benchmark...");
 
-  Rules initialRules;
-  {
-    string koRule = cfg.getString("koRule", Rules::koRuleStrings());
-    string scoringRule = cfg.getString("scoringRule", Rules::scoringRuleStrings());
-    bool multiStoneSuicideLegal = cfg.getBool("multiStoneSuicideLegal");
-    float komi = 7.5f;
-
-    initialRules.koRule = Rules::parseKoRule(koRule);
-    initialRules.scoringRule = Rules::parseScoringRule(scoringRule);
-    initialRules.multiStoneSuicideLegal = multiStoneSuicideLegal;
-    initialRules.komi = komi;
-  }
-  //Take the komi from the sgf, otherwise ignore the rules
+  Rules initialRules = Setup::loadSingleRulesExceptForKomi(cfg);
+  //Take the komi from the sgf, otherwise ignore the rules in the sgf
   initialRules.komi = sgf->komi;
 
 
@@ -251,15 +242,13 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
            << std::flush;
       int nextIdx = possiblePositionIdxs[i];
       while(moveNum < moves.size() && moveNum < nextIdx) {
-        //Tolerate suicide moves in an sgf, regardless of what the nominal rules were
-        bool multiStoneSuicideLegal = true;
-        if(!board.isLegal(moves[moveNum].loc,moves[moveNum].pla,multiStoneSuicideLegal)) {
+        bool suc = hist.makeBoardMoveTolerant(board,moves[moveNum].loc,moves[moveNum].pla);
+        if(!suc) {
           cerr << endl;
           cerr << board << endl;
           cerr << "SGF Illegal move " << (moveNum+1) << " for " << PlayerIO::colorToChar(moves[moveNum].pla) << ": " << Location::toString(moves[moveNum].loc,board) << endl;
           throw StringError("Illegal move in SGF");
         }
-        hist.makeBoardMoveAssumeLegal(board,moves[moveNum].loc,moves[moveNum].pla,NULL);
         nextPla = getOpp(moves[moveNum].pla);
         moveNum += 1;
       }
@@ -284,8 +273,36 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
     delete bot;
   };
 
+  //From some test matches by lightvector using g104
+  const double eloCostPerThread = 8;
+  const double eloGainPerDoubling = 250;
+
   cout << endl;
-  cout << "Testing..." << endl;
+  cout << "Testing using " << maxVisits << " visits.";
+  if(maxVisits == defaultMaxVisits) {
+    cout << " If you have a good GPU, you might increase this using \"-visits N\" to get more accurate results." << endl;
+    cout << " If you have a weak GPU and this is taking forever, you can decrease it instead to finish the benchmark faster." << endl;
+  }
+  else
+    cout << endl;
+  cout << endl;
+#ifdef USE_CUDA_BACKEND
+  cout << "Your GTP config is currently set to cudaUseFP16 = " << Global::boolToString(nnEval->getUsingFP16())
+       << " and cudaUseNHWC = " << Global::boolToString(nnEval->getUsingNHWC()) << endl;
+  if(!nnEval->getUsingFP16())
+    cout << "If you have a strong GPU capable of FP16 tensor cores (e.g. RTX2080) setting these both to true may give a large performance boost." << endl;
+#endif
+#ifdef USE_OPENCL_BACKEND
+  cout << "You are currently using the OpenCL version of KataGo." << endl;
+  //TODO update when we have FP16 opencl
+  cout << "If you have a strong GPU capable of FP16 tensor cores (e.g. RTX2080), "
+       << "downloading or compiling the Cuda version of KataGo and setting cudaUseFP16=true and cudaUseNHWC=true may give a large performance boost." << endl;
+#endif
+  cout << endl;
+  cout << "Your GTP config is currently set to use numSearchThreads = " << params.numThreads << endl;
+  if(numThreadsToTest.size() > 1)
+    cout << "Testing different numbers of threads: " << endl;
+  vector<double> eloEffects;
   for(int i = 0; i<numThreadsToTest.size(); i++) {
     int numThreads = numThreadsToTest[i];
     int64_t totalVisits;
@@ -295,14 +312,41 @@ int MainCmds::benchmark(int argc, const char* const* argv) {
     int64_t numNNBatches;
     double avgBatchSize;
     testNumThreads(numThreads,totalVisits,totalSeconds,totalPositions,numNNEvals,numNNBatches,avgBatchSize);
+    eloEffects.push_back(eloGainPerDoubling * log(totalVisits / totalSeconds) / log(2) - eloCostPerThread * numThreads);
     cout << "\rnumSearchThreads = " << Global::strprintf("%2d",numThreads) << ":"
          << " " << totalPositions << " / " << possiblePositionIdxs.size() << " positions,"
          << " visits/s = " << Global::strprintf("%.2f",totalVisits / totalSeconds)
          << " nnEvals/s = " << Global::strprintf("%.2f",numNNEvals / totalSeconds)
          << " nnBatches/s = " << Global::strprintf("%.2f",numNNBatches / totalSeconds)
          << " avgBatchSize = " << Global::strprintf("%.2f",avgBatchSize)
-         << " (" << Global::strprintf("%.1f", totalSeconds) << " secs)"
-         << std::flush;
+         << " (" << Global::strprintf("%.1f", totalSeconds) << " secs)";
+    if(numThreadsToTest.size() > 1) {
+      if(i == 0)
+        cout << " (EloDiff baseline)";
+      else
+        cout << " (EloDiff " << Global::strprintf("%+.0f",eloEffects[i] - eloEffects[0]) << ")";
+    }
+    cout << std::flush;
+  }
+  cout << endl;
+
+  if(numThreadsToTest.size() > 1) {
+    cout << endl;
+    cout << "Based on some test data, each thread costs perhaps ~" << eloCostPerThread << " Elo holding visits fixed (by making MCTS worse)." << endl;
+    cout << "Based on some test data, each speed doubling gains perhaps ~" << eloGainPerDoubling << " Elo by searching deeper." << endl;
+    cout << "So APPROXIMATELY based on this benchmark: " << endl;
+    for(int i = 0; i<numThreadsToTest.size(); i++) {
+      int numThreads = numThreadsToTest[i];
+      double eloEffect = eloEffects[i] - eloEffects[0];
+      cout << "numSearchThreads = " << Global::strprintf("%2d",numThreads) << ": ";
+      if(i == 0)
+        cout << "(baseline)" << endl;
+      else
+        cout << Global::strprintf("%+5.0f",eloEffect) << " Elo" << endl;
+    }
+    cout << endl;
+    cout << "If you care about performance, you may want to edit numSearchThreads in " << configFile << " based on the above results!" << endl;
+    cout << "If interested see also other notes about performance and mem usage in the top of that file." << endl;
   }
   cout << endl;
 

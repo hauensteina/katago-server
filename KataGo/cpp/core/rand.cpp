@@ -15,9 +15,11 @@
 
 #include "../core/global.h"
 #include "../core/hash.h"
+#include "../core/md5.h"
 #include "../core/sha2.h"
 #include "../core/test.h"
 #include "../core/timer.h"
+#include "../core/bsearch.h"
 
 using namespace std;
 
@@ -271,6 +273,19 @@ void Rand::init(const string& seed)
   numCalls = 0;
 }
 
+size_t Rand::nextIndexCumulative(const double* cumRelProbs, size_t n)
+{
+  assert(n > 0);
+  assert(n < 0xFFFFFFFF);
+  double_t sum = cumRelProbs[n-1];
+  double d = nextDouble(sum);
+  size_t r = BSearch::findFirstGt(cumRelProbs,d,0,n);
+  if(r == n)
+    return n-1;
+  return r;
+}
+
+
 //Marsaglia and Tsang's algorithm
 double Rand::nextGamma(double a) {
   if(!(a > 0.0))
@@ -350,6 +365,16 @@ static void simpleTest()
       cout << Global::uint32ToHexString(expected[i]) << endl;
       Global::fatalError("Rand generated unexpected values");
     }
+  }
+
+  {
+    uint32_t hash[4];
+    const string s = "The quick brown fox jumps over the lazy dog.";
+    MD5::get(s.c_str(),s.length(),hash);
+    testAssert(hash[0] == 0xC209D9E4);
+    testAssert(hash[1] == 0x1CFBD090);
+    testAssert(hash[2] == 0xADFF68A0);
+    testAssert(hash[3] == 0xD0CB22DF);
   }
 
   char hash[129];
@@ -657,6 +682,34 @@ rand.nextLogistic()
 -0.208472
 -1.73322
 -0.607461
+)%%";
+    TestCommon::expect(name,out,expected);
+  }
+
+  {
+    const char* name = "nextIndexCumulative tests";
+    Rand rand(name);
+
+    double probs[5] = {1.0, 4.0, 2.5, 0.5, 2.0};
+    double cumProbs[5];
+    for(int i = 0; i<5; i++)
+      cumProbs[i] = (i == 0 ? probs[i] : probs[i] + cumProbs[i-1]);
+
+    int frequencies[5] = {0,0,0,0,0};
+    for(int i = 0; i<10000; i++) {
+      int r = (int)rand.nextIndexCumulative(cumProbs,5);
+      testAssert(r >= 0 && r < 5);
+      frequencies[r]++;
+    }
+    for(int i = 0; i<5; i++)
+      out << frequencies[i] << endl;
+
+    string expected = R"%%(
+1019
+3978
+2522
+513
+1968
 )%%";
     TestCommon::expect(name,out,expected);
   }

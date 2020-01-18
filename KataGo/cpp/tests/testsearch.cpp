@@ -22,12 +22,14 @@ struct TestSearchOptions {
   bool printEndingScoreValueBonus;
   bool printPlaySelectionValues;
   bool noClearBot;
+  bool ignorePosition;
   TestSearchOptions()
     :numMovesInARow(1),
      printRootPolicy(false),
      printEndingScoreValueBonus(false),
      printPlaySelectionValues(false),
-     noClearBot(false)
+     noClearBot(false),
+     ignorePosition(false)
   {}
 };
 
@@ -39,7 +41,8 @@ static void printPolicyValueOwnership(const Board& board, const NNResultBuf& buf
 
 static void runBotOnPosition(AsyncBot* bot, Board board, Player nextPla, BoardHistory hist, TestSearchOptions opts) {
 
-  bot->setPosition(nextPla,board,hist);
+  if(!opts.ignorePosition)
+    bot->setPosition(nextPla,board,hist);
   Search* search = bot->getSearch();
 
   for(int i = 0; i<opts.numMovesInARow; i++) {
@@ -99,7 +102,7 @@ static void runBotOnSgf(AsyncBot* bot, const string& sgfStr, const Rules& defaul
   Player nextPla;
   BoardHistory hist;
   Rules initialRules = sgf->getRulesOrFailAllowUnspecified(defaultRules);
-  sgf->setupBoardAndHist(initialRules, board, nextPla, hist, turnNumber);
+  sgf->setupBoardAndHistAssumeLegal(initialRules, board, nextPla, hist, turnNumber);
   hist.setKomi(overrideKomi);
   runBotOnPosition(bot,board,nextPla,hist,opts);
   delete sgf;
@@ -139,7 +142,9 @@ static NNEvaluator* startNNEval(
     debugSkipNeuralNet,
     nnPolicyTemperature,
     openCLTunerFile,
-    openCLReTunePerBoardSize
+    openCLReTunePerBoardSize,
+    useFP16,
+    useNHWC
   );
   (void)inputsUseNHWC;
 
@@ -156,9 +161,7 @@ static NNEvaluator* startNNEval(
     nnRandSeed,
     defaultSymmetry,
     logger,
-    gpuIdxByServerThread,
-    useFP16,
-    useNHWC
+    gpuIdxByServerThread
   );
 
   return nnEval;
@@ -280,6 +283,7 @@ static void runBasicPositions(NNEvaluator* nnEval, Logger& logger)
 
       SearchParams testParams2 = params;
       testParams2.rootPolicyTemperature = 1.5;
+      testParams2.rootPolicyTemperatureEarly = 1.5;
       bot->setParams(testParams2);
       runBotOnSgf(bot, sgfStr, rules, 44, 7.5, opts);
       bot->setParams(params);
@@ -334,13 +338,13 @@ static void runOwnershipAndMisc(NNEvaluator* nnEval, NNEvaluator* nnEval11, NNEv
     Player nextPla;
     BoardHistory hist;
     Rules initialRules = sgf->getRulesOrFailAllowUnspecified(Rules::getTrompTaylorish());
-    sgf->setupBoardAndHist(initialRules, board, nextPla, hist, 40);
+    sgf->setupBoardAndHistAssumeLegal(initialRules, board, nextPla, hist, 40);
 
-    double drawEquivalentWinsForWhite = 0.5;
+    MiscNNInputParams nnInputParams;
     NNResultBuf buf;
     bool skipCache = true;
     bool includeOwnerMap = true;
-    nnEval->evaluate(board,hist,nextPla,drawEquivalentWinsForWhite,buf,NULL,skipCache,includeOwnerMap);
+    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
 
     printPolicyValueOwnership(board,buf);
 
@@ -349,7 +353,7 @@ static void runOwnershipAndMisc(NNEvaluator* nnEval, NNEvaluator* nnEval11, NNEv
     cout << endl << endl;
 
     cout << "With root temperature===================" << endl;
-    nnEvalPTemp->evaluate(board,hist,nextPla,drawEquivalentWinsForWhite,buf,NULL,skipCache,includeOwnerMap);
+    nnEvalPTemp->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
 
     printPolicyValueOwnership(board,buf);
 
@@ -371,18 +375,18 @@ static void runOwnershipAndMisc(NNEvaluator* nnEval, NNEvaluator* nnEval11, NNEv
     Player nextPla;
     BoardHistory hist;
     Rules initialRules = sgf->getRulesOrFailAllowUnspecified(Rules::getTrompTaylorish());
-    sgf->setupBoardAndHist(initialRules, board, nextPla, hist, 43);
+    sgf->setupBoardAndHistAssumeLegal(initialRules, board, nextPla, hist, 43);
 
-    double drawEquivalentWinsForWhite = 0.5;
+    MiscNNInputParams nnInputParams;
     NNResultBuf buf;
     bool skipCache = true;
     bool includeOwnerMap = true;
-    nnEval->evaluate(board,hist,nextPla,drawEquivalentWinsForWhite,buf,NULL,skipCache,includeOwnerMap);
+    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
     printPolicyValueOwnership(board,buf);
 
     cout << "NNLen 11" << endl;
     NNResultBuf buf11;
-    nnEval11->evaluate(board,hist,nextPla,drawEquivalentWinsForWhite,buf11,NULL,skipCache,includeOwnerMap);
+    nnEval11->evaluate(board,hist,nextPla,nnInputParams,buf11,NULL,skipCache,includeOwnerMap);
     testAssert(buf11.result->nnXLen == 11);
     testAssert(buf11.result->nnYLen == 11);
     printPolicyValueOwnership(board,buf11);
@@ -634,6 +638,105 @@ o..o..oxo
     }
   }
 
+  {
+    cout << "GAME 13 ==========================================================================" << endl;
+    cout << "(Conservative pass)" << endl;
+    cout << endl;
+
+    string seed = "abc";
+    Rules rules = Rules::getTrompTaylorish();
+    rules.komi = 0;
+
+    Player nextPla = P_BLACK;
+    Board board = Board::parseBoard(9,9,R"%%(
+.........
+..x...x..
+.........
+xxxxxxxx.
+ooooooooo
+...o.o.o.
+xx.o.o.o.
+.xxo.o.o.
+..xo.o.o.
+)%%");
+    BoardHistory hist(board,nextPla,rules,0);
+    hist.makeBoardMoveAssumeLegal(board,Board::PASS_LOC,nextPla,NULL);
+    nextPla = P_WHITE;
+
+    {
+      cout << "conservativePass=false" << endl;
+      SearchParams params;
+      params.maxVisits = 80;
+      params.rootFpuReductionMax = 0.0;
+      params.rootPolicyTemperature = 1.5;
+      params.rootPolicyTemperatureEarly = 1.5;
+      params.rootNoiseEnabled = true;
+      AsyncBot* bot = new AsyncBot(params, nnEval, &logger, seed);
+      TestSearchOptions opts;
+      runBotOnPosition(bot,board,nextPla,hist,opts);
+      delete bot;
+    }
+
+    {
+      cout << "conservativePass=true" << endl;
+      SearchParams params;
+      params.maxVisits = 80;
+      params.conservativePass = true;
+      params.rootFpuReductionMax = 0.0;
+      params.rootPolicyTemperature = 1.5;
+      params.rootPolicyTemperatureEarly = 1.5;
+      params.rootNoiseEnabled = true;
+      AsyncBot* bot = new AsyncBot(params, nnEval, &logger, seed);
+      TestSearchOptions opts;
+      runBotOnPosition(bot,board,nextPla,hist,opts);
+      delete bot;
+    }
+  }
+
+  {
+    cout << "GAME 14 ==========================================================================" << endl;
+    cout << "Root noise and temperature across moves" << endl;
+    cout << endl;
+
+    string seed = getSearchRandSeed();
+    Rules rules = Rules::getTrompTaylorish();
+    rules.komi = 5.5;
+    TestSearchOptions opts;
+    opts.noClearBot = true;
+
+    Player nextPla = P_WHITE;
+    Board board = Board::parseBoard(9,9,R"%%(
+.........
+.........
+....o....
+..x......
+....x.x..
+..xo.....
+.....o...
+.........
+.........
+)%%");
+    BoardHistory hist(board,nextPla,rules,0);
+
+    SearchParams params;
+    params.maxVisits = 200;
+    params.rootPolicyTemperature = 2.5;
+    params.rootPolicyTemperatureEarly = 2.5;
+    params.rootNoiseEnabled = true;
+    AsyncBot* bot = new AsyncBot(params, nnEval, &logger, seed);
+    bot->setAlwaysIncludeOwnerMap(true);
+
+    runBotOnPosition(bot,board,nextPla,hist,opts);
+    hist.makeBoardMoveAssumeLegal(board,Location::ofString("D5",board),nextPla,NULL);
+    bot->getSearch()->printTree(cout, bot->getSearch()->rootNode, PrintTreeOptions().onlyBranch(board,"D5"), P_WHITE);
+    bot->makeMove(Location::ofString("D5",board),nextPla);
+    nextPla = getOpp(nextPla);
+    opts.ignorePosition = true;
+    runBotOnPosition(bot,board,nextPla,hist,opts);
+
+    delete bot;
+  }
+
 }
 
 
@@ -712,7 +815,7 @@ void Tests::runNNLessSearchTests() {
     BoardHistory hist(board,nextPla,rules,0);
 
     search->setPosition(nextPla,board,hist);
-    search->runWholeSearch(nextPla,logger,NULL);
+    search->runWholeSearch(nextPla,logger);
 
     PrintTreeOptions options;
     options = options.maxDepth(1);
@@ -797,7 +900,7 @@ ooooooo
       cout << "First perform a basic search." << endl;
 
       search->setPosition(nextPla,board,hist);
-      search->runWholeSearch(nextPla,logger,NULL);
+      search->runWholeSearch(nextPla,logger);
 
       //In theory nothing requires this, but it would be kind of crazy if this were false
       testAssert(search->rootNode->numChildren > 1);
@@ -824,7 +927,7 @@ ooooooo
       //--------------------------------------
       cout << "Then continue the search to complete 50 visits." << endl;
 
-      search->runWholeSearch(nextPla,logger,NULL);
+      search->runWholeSearch(nextPla,logger);
       search->printTree(cout, search->rootNode, options, P_WHITE);
       cout << endl;
     }
@@ -895,7 +998,7 @@ o..oo.x
       TestSearchOptions opts;
 
       search->setPosition(nextPla,board,hist);
-      search->runWholeSearch(nextPla,logger,NULL);
+      search->runWholeSearch(nextPla,logger);
       PrintTreeOptions options;
       options = options.maxDepth(1);
       cout << search->rootBoard << endl;
@@ -919,7 +1022,7 @@ o..oo.x
       TestSearchOptions opts;
 
       search->setPosition(nextPla,board,hist);
-      search->runWholeSearch(nextPla,logger,NULL);
+      search->runWholeSearch(nextPla,logger);
       PrintTreeOptions options;
       options = options.maxDepth(1);
       cout << search->rootBoard << endl;
@@ -955,7 +1058,7 @@ o..oo.x
       TestSearchOptions opts;
 
       search->setPosition(nextPla,board,hist);
-      search->runWholeSearch(nextPla,logger,NULL);
+      search->runWholeSearch(nextPla,logger);
       PrintTreeOptions options;
       options = options.maxDepth(1);
       cout << search->rootBoard << endl;
@@ -985,7 +1088,7 @@ o..oo.x
       cout << endl;
 
       cout << "Continue searching a bit more" << endl;
-      search->runWholeSearch(getOpp(nextPla),logger,NULL);
+      search->runWholeSearch(getOpp(nextPla),logger);
 
       cout << search->rootBoard << endl;
       search->printTree(cout, search->rootNode, options, P_WHITE);
@@ -1029,7 +1132,7 @@ o..o.oo
       TestSearchOptions opts;
 
       search->setPosition(nextPla,board,hist);
-      search->runWholeSearch(nextPla,logger,NULL);
+      search->runWholeSearch(nextPla,logger);
       PrintTreeOptions options;
       options = options.maxDepth(1);
       options = options.printSqs(true);
@@ -1086,7 +1189,7 @@ o..o.oo
     BoardHistory hist(board,nextPla,rules,0);
 
     search->setPosition(nextPla,board,hist);
-    search->runWholeSearch(nextPla,logger,NULL);
+    search->runWholeSearch(nextPla,logger);
 
     cout << search->rootBoard << endl;
 
@@ -1098,6 +1201,7 @@ o..o.oo
     delete nnEval;
     cout << endl;
   }
+
 
   {
     cout << "===================================================================" << endl;
@@ -1157,6 +1261,100 @@ o..o.oo
     run(11,7);
   }
 
+  {
+    cout << "===================================================================" << endl;
+    cout << "Search tolerates moving past game end" << endl;
+    cout << "===================================================================" << endl;
+
+    NNEvaluator* nnEval = startNNEval(modelFile,logger,"",7,7,0,true,false,false,true,1.0f);
+    SearchParams params;
+    params.maxVisits = 200;
+    Search* search = new Search(params, nnEval, "autoSearchRandSeed");
+    Search* search2 = new Search(params, nnEval, "autoSearchRandSeed");
+    Search* search3 = new Search(params, nnEval, "autoSearchRandSeed");
+    Rules rules = Rules::getTrompTaylorish();
+    TestSearchOptions opts;
+    PrintTreeOptions options;
+    options = options.maxDepth(1);
+
+    Board board = Board::parseBoard(7,7,R"%%(
+.x.xo.o
+xxxoooo
+xxxxoo.
+x.xo.oo
+xxxoooo
+xxxxooo
+.xxxooo
+)%%");
+    Player nextPla = P_WHITE;
+    BoardHistory hist(board,nextPla,rules,0);
+
+    search->setPosition(nextPla,board,hist);
+    search2->setPosition(nextPla,board,hist);
+    search3->setPosition(nextPla,board,hist);
+
+    search->makeMove(Location::ofString("C7",board),nextPla);
+    search2->makeMove(Location::ofString("C7",board),nextPla);
+    hist.makeBoardMoveAssumeLegal(board,Location::ofString("C7",board),nextPla,NULL);
+    nextPla = getOpp(nextPla);
+    search3->setPosition(nextPla,board,hist);
+
+    search->makeMove(Location::ofString("pass",board),nextPla);
+    search2->makeMove(Location::ofString("pass",board),nextPla);
+    hist.makeBoardMoveAssumeLegal(board,Location::ofString("pass",board),nextPla,NULL);
+    nextPla = getOpp(nextPla);
+    search3->setPosition(nextPla,board,hist);
+    board.checkConsistency();
+
+    search2->runWholeSearch(nextPla,logger);
+
+    search->makeMove(Location::ofString("pass",board),nextPla);
+    search2->makeMove(Location::ofString("pass",board),nextPla);
+    board.checkConsistency();
+    hist.makeBoardMoveAssumeLegal(board,Location::ofString("pass",board),nextPla,NULL);
+    nextPla = getOpp(nextPla);
+    search3->setPosition(nextPla,board,hist);
+
+    assert(hist.isGameFinished);
+
+    search->runWholeSearch(nextPla,logger);
+    search2->runWholeSearch(nextPla,logger);
+    search3->runWholeSearch(nextPla,logger);
+
+    hist.printDebugInfo(cout,board);
+    cout << "Search made move after gameover" << endl;
+    search->printTree(cout, search->rootNode, options, P_WHITE);
+    cout << "Search made move (carrying tree over) after gameover" << endl;
+    search2->printTree(cout, search->rootNode, options, P_WHITE);
+    cout << "Position was set after gameover" << endl;
+    search3->printTree(cout, search->rootNode, options, P_WHITE);
+
+    cout << "Recapturing ko after two passes and supposed game over (violates superko)" << endl;
+    search->makeMove(Location::ofString("D7",board),nextPla);
+    search2->makeMove(Location::ofString("D7",board),nextPla);
+    hist.makeBoardMoveAssumeLegal(board,Location::ofString("D7",board),nextPla,NULL);
+    nextPla = getOpp(nextPla);
+    search3->setPosition(nextPla,board,hist);
+
+    search->runWholeSearch(nextPla,logger);
+    search2->runWholeSearch(nextPla,logger);
+    search3->runWholeSearch(nextPla,logger);
+
+    hist.printDebugInfo(cout,board);
+    cout << "Search made move" << endl;
+    search->printTree(cout, search->rootNode, options, P_WHITE);
+    cout << "Search made move (carrying tree over)" << endl;
+    search2->printTree(cout, search->rootNode, options, P_WHITE);
+    cout << "Position was set" << endl;
+    search3->printTree(cout, search->rootNode, options, P_WHITE);
+
+    delete search;
+    delete search2;
+    delete search3;
+    delete nnEval;
+    cout << endl;
+  }
+
   NeuralNet::globalCleanup();
 }
 
@@ -1181,16 +1379,61 @@ void Tests::runNNOnTinyBoard(const string& modelFile, bool inputsNHWC, bool cuda
 
   NNEvaluator* nnEval = startNNEval(modelFile,logger,"",6,6,symmetry,inputsNHWC,cudaNHWC,useFP16,false,1.0f);
 
-  double drawEquivalentWinsForWhite = 0.5;
+  MiscNNInputParams nnInputParams;
   NNResultBuf buf;
   bool skipCache = true;
   bool includeOwnerMap = true;
-  nnEval->evaluate(board,hist,nextPla,drawEquivalentWinsForWhite,buf,NULL,skipCache,includeOwnerMap);
+  nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
 
   printPolicyValueOwnership(board,buf);
   cout << endl << endl;
 
   delete nnEval;
+  NeuralNet::globalCleanup();
+}
+
+//TODO incorporate an auto test of this and one that grabs the root policy with symmetry averaging
+void Tests::runNNSymmetries(const string& modelFile, bool inputsNHWC, bool cudaNHWC, bool useFP16) {
+  NeuralNet::globalInitialize();
+
+  Board board = Board::parseBoard(9,13,R"%%(
+.........
+.........
+..x.o....
+......o..
+..x......
+.........
+......o..
+.........
+..x......
+....x....
+...xoo...
+.........
+.........
+)%%");
+
+  Player nextPla = P_BLACK;
+  Rules rules = Rules::getTrompTaylorish();
+  BoardHistory hist(board,nextPla,rules,0);
+
+  Logger logger;
+  logger.setLogToStdout(true);
+  logger.setLogTime(false);
+
+  for(int symmetry = 0; symmetry<8; symmetry++) {
+    NNEvaluator* nnEval = startNNEval(modelFile,logger,"",13,13,symmetry,inputsNHWC,cudaNHWC,useFP16,false,1.0f);
+
+    MiscNNInputParams nnInputParams;
+    NNResultBuf buf;
+    bool skipCache = true;
+    bool includeOwnerMap = true;
+    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
+
+    printPolicyValueOwnership(board,buf);
+    cout << endl << endl;
+
+    delete nnEval;
+  }
   NeuralNet::globalCleanup();
 }
 
@@ -1210,7 +1453,7 @@ void Tests::runNNOnManyPoses(const string& modelFile, bool inputsNHWC, bool cuda
   int nnXLen = 19;
   int nnYLen = 19;
   NNEvaluator* nnEval = startNNEval(modelFile,logger,"",nnXLen,nnYLen,symmetry,inputsNHWC,cudaNHWC,useFP16,false,1.0f);
-  double drawEquivalentWinsForWhite = 0.5;
+  MiscNNInputParams nnInputParams;
   NNResultBuf buf;
   bool skipCache = true;
   bool includeOwnerMap = true;
@@ -1224,8 +1467,8 @@ void Tests::runNNOnManyPoses(const string& modelFile, bool inputsNHWC, bool cuda
     Player nextPla;
     BoardHistory hist;
     Rules initialRules = sgf->getRulesOrFailAllowUnspecified(Rules());
-    sgf->setupBoardAndHist(initialRules, board, nextPla, hist, turnNumber);
-    nnEval->evaluate(board,hist,nextPla,drawEquivalentWinsForWhite,buf,NULL,skipCache,includeOwnerMap);
+    sgf->setupBoardAndHistAssumeLegal(initialRules, board, nextPla, hist, turnNumber);
+    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
 
     winProbs.push_back(buf.result->whiteWinProb);
     scoreMeans.push_back(buf.result->whiteScoreMean);

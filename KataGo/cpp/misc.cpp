@@ -308,8 +308,9 @@ static void initializeDemoGame(Board& board, BoardHistory& hist, Player& pla, Ra
           wasSpecified = false;
           Search* search = bot->getSearch();
           NNResultBuf buf;
-          double drawEquivalentWinsForWhite = search->searchParams.drawEquivalentWinsForWhite;
-          search->nnEvaluator->evaluate(board,hist,pla,drawEquivalentWinsForWhite,buf,NULL,false,false);
+          MiscNNInputParams nnInputParams;
+          nnInputParams.drawEquivalentWinsForWhite = search->searchParams.drawEquivalentWinsForWhite;
+          search->nnEvaluator->evaluate(board,hist,pla,nnInputParams,buf,NULL,false,false);
           std::shared_ptr<NNOutput> nnOutput = std::move(buf.result);
 
           double temperature = 0.8;
@@ -343,7 +344,7 @@ static void initializeDemoGame(Board& board, BoardHistory& hist, Player& pla, Ra
       } //Close while(true)
 
       int numVisits = 20;
-      Play::adjustKomiToEven(bot->getSearch(),board,hist,pla,numVisits,logger);
+      Play::adjustKomiToEven(bot->getSearch(),bot->getSearch(),board,hist,pla,numVisits,logger,OtherGameProperties(),rand);
       double komi = hist.rules.komi + 0.3 * rand.nextGaussian();
       komi = 0.5 * round(2.0 * komi);
       hist.setKomi((float)komi);

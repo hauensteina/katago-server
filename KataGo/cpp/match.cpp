@@ -158,7 +158,7 @@ int MainCmds::match(int argc, const char* const* argv) {
   fancyModes.allowResignation = cfg.getBool("allowResignation");
   fancyModes.resignThreshold = cfg.getDouble("resignThreshold",-1.0,0.0); //Threshold on [-1,1], regardless of winLossUtilityFactor
   fancyModes.resignConsecTurns = cfg.getInt("resignConsecTurns",1,100);
-  GameRunner* gameRunner = new GameRunner(cfg, searchRandSeedBase, fancyModes);
+  GameRunner* gameRunner = new GameRunner(cfg, searchRandSeedBase, fancyModes, logger);
 
   //Check for unused config keys
   cfg.warnUnusedKeys(cerr,&logger);
@@ -196,7 +196,7 @@ int MainCmds::match(int argc, const char* const* argv) {
       MatchPairer::BotSpec botSpecW;
       if(matchPairer->getMatchup(gameIdx, botSpecB, botSpecW, logger)) {
         gameData = gameRunner->runGame(
-          gameIdx, botSpecB, botSpecW, NULL, NULL, logger,
+          gameIdx, botSpecB, botSpecW, NULL, logger,
           stopConditions, NULL
         );
       }
@@ -204,7 +204,7 @@ int MainCmds::match(int argc, const char* const* argv) {
       bool shouldContinue = gameData != NULL;
       if(gameData != NULL) {
         if(sgfOut != NULL) {
-          WriteSgf::writeSgf(*sgfOut,gameData->bName,gameData->wName,gameData->startHist.rules,gameData->endHist,NULL);
+          WriteSgf::writeSgf(*sgfOut,gameData->bName,gameData->wName,gameData->endHist,gameData);
           (*sgfOut) << endl;
         }
         delete gameData;

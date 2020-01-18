@@ -68,11 +68,15 @@ int MainCmds::analysis(int argc, const char* const* argv) {
   logger.write(Version::getKataGoVersionForHelp());
 
   SearchParams params = Setup::loadSingleParams(cfg);
-  const int whiteBonusPerHandicapStone = cfg.contains("whiteBonusPerHandicapStone") ? cfg.getInt("whiteBonusPerHandicapStone",0,1) : 0;
+  //Set a default for conservativePass that differs from matches or selfplay
+  if(!cfg.contains("conservativePass") && !cfg.contains("conservativePass0"))
+    params.conservativePass = true;
+
   const int analysisPVLen = cfg.contains("analysisPVLen") ? cfg.getInt("analysisPVLen",1,100) : 15;
   const Player perspective = Setup::parseReportAnalysisWinrates(cfg,C_EMPTY);
   const bool assumeMultipleStartingBlackMovesAreHandicap =
     cfg.contains("assumeMultipleStartingBlackMovesAreHandicap") ? cfg.getBool("assumeMultipleStartingBlackMovesAreHandicap") : true;
+  const bool preventEncore = cfg.contains("preventCleanupPhase") ? cfg.getBool("preventCleanupPhase") : true;
 
   NNEvaluator* nnEval;
   {
@@ -102,7 +106,7 @@ int MainCmds::analysis(int argc, const char* const* argv) {
 
   ThreadSafeQueue<AnalyzeRequest*> toAnalyzeQueue;
 
-  auto analysisLoop = [&params,&nnEval,&logger,perspective,&toAnalyzeQueue,&toWriteQueue]() {
+  auto analysisLoop = [&params,&nnEval,&logger,perspective,&toAnalyzeQueue,&toWriteQueue,&preventEncore]() {
     Rand threadRand;
     string searchRandSeed = Global::uint64ToHexString(threadRand.nextUInt64());
     AsyncBot* bot = new AsyncBot(params, nnEval, &logger, searchRandSeed);
@@ -117,6 +121,7 @@ int MainCmds::analysis(int argc, const char* const* argv) {
       thisParams.maxVisits = request->maxVisits;
       thisParams.rootFpuReductionMax = request->rootFpuReductionMax;
       thisParams.rootPolicyTemperature = request->rootPolicyTemperature;
+      thisParams.rootPolicyTemperatureEarly = request->rootPolicyTemperature;
       bot->setPosition(request->nextPla,request->board,request->hist);
       bot->setAlwaysIncludeOwnerMap(request->includeOwnership);
       bot->setParams(thisParams);
@@ -141,11 +146,13 @@ int MainCmds::analysis(int argc, const char* const* argv) {
         double lcb = Play::getHackedLCBForWinrate(search,data,pla);
         double utilityLcb = data.lcb;
         double scoreMean = data.scoreMean;
+        double lead = data.lead;
         if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
           winrate = 1.0-winrate;
           lcb = 1.0 - lcb;
           utility = -utility;
           scoreMean = -scoreMean;
+          lead = -lead;
           utilityLcb = -utilityLcb;
         }
 
@@ -154,7 +161,9 @@ int MainCmds::analysis(int argc, const char* const* argv) {
         moveInfo["visits"] = data.numVisits;
         moveInfo["utility"] = utility;
         moveInfo["winrate"] = winrate;
-        moveInfo["scoreMean"] = scoreMean;
+        moveInfo["scoreMean"] = lead;
+        moveInfo["scoreSelfplay"] = scoreMean;
+        moveInfo["scoreLead"] = lead;
         moveInfo["scoreStdev"] = data.scoreStdev;
         moveInfo["prior"] = data.policyPrior;
         moveInfo["lcb"] = lcb;
@@ -162,7 +171,8 @@ int MainCmds::analysis(int argc, const char* const* argv) {
         moveInfo["order"] = data.order;
 
         json pv = json::array();
-        for(int j = 0; j<data.pv.size(); j++)
+        int pvLen = (preventEncore && data.pvContainsPass()) ? data.getPVLenUpToPhaseEnd(request->board,request->hist,request->nextPla) : (int)data.pv.size();
+        for(int j = 0; j<pvLen; j++)
           pv.push_back(Location::toString(data.pv[j],request->board));
         moveInfo["pv"] = pv;
 
@@ -405,8 +415,12 @@ int MainCmds::analysis(int argc, const char* const* argv) {
     }
     Player initialPlayer = C_EMPTY;
     if(input.find("initialPlayer") != input.end()) {
-      string s = input["initialPlayer"].get<string>();
-      if(!PlayerIO::tryParsePlayer(s,initialPlayer)) {
+      try {
+        string s = input["initialPlayer"].get<string>();
+        PlayerIO::tryParsePlayer(s,initialPlayer);
+      }
+      catch(nlohmann::detail::exception&) {}
+      if(initialPlayer != P_BLACK && initialPlayer != P_WHITE) {
         reportErrorForId(rbase.id, "initialPlayer", "Must be \"b\" or \"w\"");
         continue;
       }
@@ -418,8 +432,7 @@ int MainCmds::analysis(int argc, const char* const* argv) {
       try {
         analyzeTurns = input["analyzeTurns"].get<vector<int> >();
       }
-      catch(nlohmann::detail::exception& e) {
-        (void)e;
+      catch(nlohmann::detail::exception&) {
         reportErrorForId(rbase.id, "analyzeTurns", "Must specify an array of integers indicating turns to analyze");
         continue;
       }
@@ -443,24 +456,57 @@ int MainCmds::analysis(int argc, const char* const* argv) {
 
     Rules rules;
     if(input.find("rules") != input.end()) {
-      string s = input["rules"].get<string>();
-      if(!Rules::tryParseRules(s,rules)) {
-        reportErrorForId(rbase.id, "rules", "Unknown rules: " + s);
+      if(input["rules"].is_string()) {
+        string s = input["rules"].get<string>();
+        if(!Rules::tryParseRules(s,rules)) {
+          reportErrorForId(rbase.id, "rules", "Could not parse rules: " + s);
+          continue;
+        }
+      }
+      else if(input["rules"].is_object()) {
+        string s = input["rules"].dump();
+        if(!Rules::tryParseRules(s,rules)) {
+          reportErrorForId(rbase.id, "rules", "Could not parse rules: " + s);
+          continue;
+        }
+      }
+      else {
+        reportErrorForId(rbase.id, "rules", "Must specify rules string, such as \"chinese\" or \"tromp-taylor\", or a JSON object with detailed rules parameters.");
         continue;
       }
     }
     else {
-      reportErrorForId(rbase.id, "rules", "Must specify rules string, such as \"chinese\" or \"tromp-taylor\", or \"koPOSITIONALscoreAREAsui0\".");
+      reportErrorForId(rbase.id, "rules", "Must specify rules string, such as \"chinese\" or \"tromp-taylor\", or a JSON object with detailed rules parameters.");
       continue;
     }
+
     if(input.find("komi") != input.end()) {
       double komi;
-      bool suc = parseDouble("komi", komi, -100.0, 100.0, "Must be a integer or half-integer from -100.0 to 100.0");
+      static_assert(Rules::MIN_USER_KOMI == -150.0f, "");
+      static_assert(Rules::MAX_USER_KOMI == 150.0f, "");
+      const char* msg = "Must be a integer or half-integer from -150.0 to 150.0";
+      bool suc = parseDouble("komi", komi, Rules::MIN_USER_KOMI, Rules::MAX_USER_KOMI, msg);
       if(!suc)
         continue;
       rules.komi = (float)komi;
       if(!Rules::komiIsIntOrHalfInt(rules.komi)) {
-        reportErrorForId(rbase.id, "rules", "Must be a integer or half-integer from -100.0 to 100.0");
+        reportErrorForId(rbase.id, "rules", msg);
+        continue;
+      }
+    }
+
+    if(input.find("whiteHandicapBonus") != input.end()) {
+      if(!input["whiteHandicapBonus"].is_string()) {
+        reportErrorForId(rbase.id, "whiteHandicapBonus", "Must be a string");
+        continue;
+      }
+      string s = input["whiteHandicapBonus"].get<string>();
+      try {
+        int whiteHandicapBonusRule = Rules::parseWhiteHandicapBonusRule(s);
+        rules.whiteHandicapBonusRule = whiteHandicapBonusRule;
+      }
+      catch(const StringError& err) {
+        reportErrorForId(rbase.id, "whiteHandicapBonus", err.what());
         continue;
       }
     }
@@ -470,6 +516,7 @@ int MainCmds::analysis(int argc, const char* const* argv) {
       if(!suc)
         continue;
     }
+
     if(input.find("analysisPVLen") != input.end()) {
       int64_t buf;
       bool suc = parseInteger("analysisPVLen", buf, 1, 100, "Must be an integer from 1 to 100");
@@ -477,6 +524,7 @@ int MainCmds::analysis(int argc, const char* const* argv) {
         continue;
       rbase.analysisPVLen = (int)buf;
     }
+
     if(input.find("rootFpuReductionMax") != input.end()) {
       bool suc = parseDouble("rootFpuReductionMax", rbase.rootFpuReductionMax, 0.0, 2.0, "Must be a number from 0.0 to 2.0");
       if(!suc)
@@ -501,17 +549,9 @@ int MainCmds::analysis(int argc, const char* const* argv) {
     if(initialPlayer == C_EMPTY) {
       if(moveHistory.size() > 0)
         initialPlayer = moveHistory[0].pla;
-      else {
-        int nHandicapStones = Play::numHandicapStones(board,moveHistory,assumeMultipleStartingBlackMovesAreHandicap);
-        if(nHandicapStones > 0)
-          initialPlayer = P_WHITE;
-        else
-          initialPlayer = P_BLACK;
-      }
+      else
+        initialPlayer = BoardHistory::numHandicapStonesOnBoard(board) > 0 ? P_WHITE : P_BLACK;
     }
-
-    int nHandicapStones = Play::numHandicapStones(board,moveHistory,assumeMultipleStartingBlackMovesAreHandicap);
-    rules.komi += (float)(nHandicapStones * whiteBonusPerHandicapStone);
 
     bool rulesWereSupported;
     Rules supportedRules = nnEval->getSupportedRules(rules,rulesWereSupported);
@@ -524,6 +564,7 @@ int MainCmds::analysis(int argc, const char* const* argv) {
 
     Player nextPla = initialPlayer;
     BoardHistory hist(board,nextPla,rules,0);
+    hist.setAssumeMultipleStartingBlackMovesAreHandicap(assumeMultipleStartingBlackMovesAreHandicap);
 
     //Build and enqueue requests
     vector<AnalyzeRequest*> newRequests;
@@ -550,15 +591,15 @@ int MainCmds::analysis(int argc, const char* const* argv) {
       Loc moveLoc = moveHistory[turnNumber].loc;
       if(movePla != nextPla) {
         hist.clear(board,movePla,rules,hist.encorePhase);
+        hist.setAssumeMultipleStartingBlackMovesAreHandicap(assumeMultipleStartingBlackMovesAreHandicap);
       }
 
-      bool multiStoneSuicideLegal = true; //Tolerate suicide in the moves regardless of stated rules
-      if(!board.isLegal(moveLoc,movePla,multiStoneSuicideLegal)) {
+      bool suc = hist.makeBoardMoveTolerant(board,moveLoc,movePla,preventEncore);
+      if(!suc) {
         reportErrorForId(rbase.id, "moves", "Illegal move " + Global::intToString(turnNumber) + ": " + Location::toString(moveLoc,board));
         foundIllegalMove = true;
         break;
       }
-      hist.makeBoardMoveAssumeLegal(board,moveLoc,movePla,NULL);
       nextPla = getOpp(movePla);
     }
 

@@ -102,6 +102,10 @@ bool AsyncBot::makeMove(Loc moveLoc, Player movePla) {
   stopAndWait();
   return search->makeMove(moveLoc,movePla);
 }
+bool AsyncBot::makeMove(Loc moveLoc, Player movePla, bool preventEncore) {
+  stopAndWait();
+  return search->makeMove(moveLoc,movePla,preventEncore);
+}
 
 bool AsyncBot::isLegalTolerant(Loc moveLoc, Player movePla) const {
   return search->isLegalTolerant(moveLoc,movePla);
@@ -300,7 +304,7 @@ void AsyncBot::internalSearchThreadLoop() {
       callbackLoopThread = std::thread(callbackLoop);
     }
 
-    search->runWholeSearch(*logger,shouldStopNow,NULL,pondering,tc,searchFactor);
+    search->runWholeSearch(*logger,shouldStopNow,pondering,tc,searchFactor);
     Loc moveLoc = search->getChosenMoveLoc();
 
     if(callbackPeriod >= 0) {

@@ -47,6 +47,8 @@ namespace Location
 
   void getAdjacentOffsets(short adj_offsets[8], int x_size);
   bool isAdjacent(Loc loc0, Loc loc1, int x_size);
+  int distance(Loc loc0, Loc loc1, int x_size);
+  int euclideanDistanceSquared(Loc loc0, Loc loc1, int x_size);
 
   std::string toString(Loc loc, int x_size, int y_size);
   std::string toString(Loc loc, const Board& b);
@@ -95,8 +97,9 @@ struct Board
   static Hash128 ZOBRIST_KO_LOC_HASH[MAX_ARR_SIZE];
   static Hash128 ZOBRIST_KO_MARK_HASH[MAX_ARR_SIZE][4];
   static Hash128 ZOBRIST_ENCORE_HASH[3];
+  static Hash128 ZOBRIST_SECOND_ENCORE_START_HASH[MAX_ARR_SIZE][4];
   static const Hash128 ZOBRIST_PASS_ENDS_PHASE;
-
+  static const Hash128 ZOBRIST_GAME_IS_OVER;
 
   //Structs---------------------------------------
 
@@ -108,20 +111,20 @@ struct Board
   };
 
   //Tracks locations for fast random selection
-  struct PointList {
-    PointList();
-    PointList(const PointList&);
-    void operator=(const PointList&);
-    void add(Loc);
-    void remove(Loc);
-    int size() const;
-    Loc& operator[](int);
-    bool contains(Loc loc) const;
+  /* struct PointList { */
+  /*   PointList(); */
+  /*   PointList(const PointList&); */
+  /*   void operator=(const PointList&); */
+  /*   void add(Loc); */
+  /*   void remove(Loc); */
+  /*   int size() const; */
+  /*   Loc& operator[](int); */
+  /*   bool contains(Loc loc) const; */
 
-    Loc list_[MAX_PLAY_SIZE];   //Locations in the list
-    int indices_[MAX_ARR_SIZE]; //Maps location to index in the list
-    int size_;
-  };
+  /*   Loc list_[MAX_PLAY_SIZE];   //Locations in the list */
+  /*   int indices_[MAX_ARR_SIZE]; //Maps location to index in the list */
+  /*   int size_; */
+  /* }; */
 
   //Move data passed back when moves are made to allow for undos
   struct MoveRecord {
@@ -165,6 +168,7 @@ struct Board
   bool isSimpleEye(Loc loc, Player pla) const;
   //Check if a move at this location would be a capture in a simple ko mouth.
   bool wouldBeKoCapture(Loc loc, Player pla) const;
+  Loc getKoCaptureLoc(Loc loc, Player pla) const;
   //Check if this location is adjacent to stones of the specified color
   bool isAdjacentToPla(Loc loc, Player pla) const;
   //Does this connect two pla distinct groups that are not both pass-alive and not within opponent pass-alive area either?
@@ -197,7 +201,7 @@ struct Board
   Hash128 getPosHashAfterMove(Loc loc, Player pla) const;
 
   //Get a random legal move that does not fill a simple eye.
-  Loc getRandomMCLegal(Player pla);
+  /* Loc getRandomMCLegal(Player pla); */
 
   //Check if the given stone is in unescapable atari or can be put into unescapable atari.
   //WILL perform a mutable search - may alter the linked lists or heads, etc.
@@ -210,7 +214,28 @@ struct Board
   //If unsafeBigTerritories, also marks for each pla empty regions bordered by pla stones and no opp stones, regardless.
   //All other points are marked as C_EMPTY.
   //[result] must be a buffer of size MAX_ARR_SIZE and will get filled with the result
-  void calculateArea(Color* result, bool nonPassAliveStones, bool safeBigTerritories, bool unsafeBigTerritories, bool isMultiStoneSuicideLegal) const;
+  void calculateArea(
+    Color* result,
+    bool nonPassAliveStones,
+    bool safeBigTerritories,
+    bool unsafeBigTerritories,
+    bool isMultiStoneSuicideLegal
+  ) const;
+
+
+  //Calculates the area (including non pass alive stones, safe and unsafe big territories)
+  //However, strips out any "seki" regions.
+  //Seki regions are that are adjacent to any remaining empty regions.
+  //If keepTerritories, then keeps the surrounded territories in seki regions, only strips points for stones.
+  //If keepStones, then keeps the stones, only strips points for surrounded territories.
+  //whiteMinusBlackIndependentLifeRegionCount - multiply this by two for a group tax.
+  void calculateIndependentLifeArea(
+    Color* result,
+    int& whiteMinusBlackIndependentLifeRegionCount,
+    bool keepTerritories,
+    bool keepStones,
+    bool isMultiStoneSuicideLegal
+  ) const;
 
   //Run some basic sanity checks on the board state, throws an exception if not consistent, for testing/debugging
   void checkConsistency() const;
@@ -231,7 +256,7 @@ struct Board
 
   Loc ko_loc;   //A simple ko capture was made here, making it illegal to replay here next move
 
-  PointList empty_list; //List of all empty locations on board
+  /* PointList empty_list; //List of all empty locations on board */
 
   Hash128 pos_hash; //A zobrist hash of the current board position (does not include ko point or player to move)
 
@@ -260,7 +285,19 @@ struct Board
   int findLibertyGainingCaptures(Loc loc, std::vector<Loc>& buf, int bufStart, int bufIdx) const;
   bool hasLibertyGainingCaptures(Loc loc) const;
 
-  void calculateAreaForPla(Player pla, bool safeBigTerritories, bool unsafeBigTerritories, bool isMultiStoneSuicideLegal, Color* result) const;
+  void calculateAreaForPla(
+    Player pla,
+    bool safeBigTerritories,
+    bool unsafeBigTerritories,
+    bool isMultiStoneSuicideLegal,
+    Color* result
+  ) const;
+
+  void calculateIndependentLifeAreaHelper(
+    const Color* basicArea,
+    Color* result,
+    int& whiteMinusBlackIndependentLifeRegionCount
+  ) const;
 
   //static void monteCarloOwner(Player player, Board* board, int mc_counts[]);
 };

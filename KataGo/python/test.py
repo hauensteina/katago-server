@@ -75,15 +75,14 @@ elif using_npz:
 
 mode = tf.estimator.ModeKeys.EVAL
 print_model = False
-num_batches_per_epoch = 1 #doesn't matter
 if name_scope is not None:
-  with tf.name_scope(name_scope):
-    (model,target_vars,metrics) = ModelUtils.build_model_from_tfrecords_features(features,mode,print_model,log,model_config,pos_len,num_batches_per_epoch)
+  with tf.compat.v1.variable_scope(name_scope):
+    (model,target_vars,metrics) = ModelUtils.build_model_from_tfrecords_features(features,mode,print_model,log,model_config,pos_len,batch_size)
 else:
-  (model,target_vars,metrics) = ModelUtils.build_model_from_tfrecords_features(features,mode,print_model,log,model_config,pos_len,num_batches_per_epoch)
+  (model,target_vars,metrics) = ModelUtils.build_model_from_tfrecords_features(features,mode,print_model,log,model_config,pos_len,batch_size)
 
 total_parameters = 0
-for variable in tf.trainable_variables():
+for variable in tf.compat.v1.trainable_variables():
   shape = variable.get_shape()
   variable_parameters = 1
   for dim in shape:
@@ -97,17 +96,17 @@ log("Built model, %d total parameters" % total_parameters)
 
 print("Testing", flush=True)
 
-saver = tf.train.Saver(
+saver = tf.compat.v1.train.Saver(
   max_to_keep = 10000,
   save_relative_paths = True,
 )
 
 #Some tensorflow options
-#tfconfig = tf.ConfigProto(log_device_placement=False,device_count={'GPU': 0})
-tfconfig = tf.ConfigProto(log_device_placement=False)
+#tfconfig = tf.compat.v1.ConfigProto(log_device_placement=False,device_count={'GPU': 0})
+tfconfig = tf.compat.v1.ConfigProto(log_device_placement=False)
 #tfconfig.gpu_options.allow_growth = True
 tfconfig.gpu_options.per_process_gpu_memory_fraction = 0.2
-with tf.Session(config=tfconfig) as session:
+with tf.compat.v1.Session(config=tfconfig) as session:
   saver.restore(session, model_variables_prefix)
 
   log("Began session")
@@ -138,7 +137,6 @@ with tf.Session(config=tfconfig) as session:
           ptncm = npz["policyTargetsNCMove"].astype(np.float32)
           gtnc = npz["globalTargetsNC"]
           sdn = npz["scoreDistrN"].astype(np.float32)
-          sbsn = npz["selfBonusScoreN"].astype(np.float32)
           vtnchw = npz["valueTargetsNCHW"].astype(np.float32)
           nbatches = len(binchwp)//batch_size
           print("Iterating %d batches from %s" % (nbatches,data_file))
@@ -152,7 +150,6 @@ with tf.Session(config=tfconfig) as session:
               features["ptncm"]: np.array(ptncm[i*batch_size:(i+1)*batch_size]),
               features["gtnc"]: np.array(gtnc[i*batch_size:(i+1)*batch_size]),
               features["sdn"]: np.array(sdn[i*batch_size:(i+1)*batch_size]),
-              features["sbsn"]: np.array(sbsn[i*batch_size:(i+1)*batch_size]),
               features["vtnchw"]: np.array(vtnchw[i*batch_size:(i+1)*batch_size])
             })
             results.append(result)
@@ -166,17 +163,16 @@ with tf.Session(config=tfconfig) as session:
     "p0loss": target_vars.policy_loss,
     "p1loss": target_vars.policy1_loss,
     "vloss": target_vars.value_loss,
+    "tdvloss": target_vars.td_value_loss,
     "smloss": target_vars.scoremean_loss,
     "sbpdfloss": target_vars.scorebelief_pdf_loss,
     "sbcdfloss": target_vars.scorebelief_cdf_loss,
-    "bbpdfloss": target_vars.bonusbelief_pdf_loss,
-    "bbcdfloss": target_vars.bonusbelief_cdf_loss,
-    "uvloss": target_vars.utilityvar_loss,
     "oloss": target_vars.ownership_loss,
-    "rwlloss": target_vars.winloss_reg_loss,
+    "sloss": target_vars.scoring_loss,
+    "fploss": target_vars.futurepos_loss,
+    "skloss": target_vars.seki_loss,
     "rsmloss": target_vars.scoremean_reg_loss,
     "rsdloss": target_vars.scorestdev_reg_loss,
-    "roloss": target_vars.ownership_reg_loss,
     "rscloss": target_vars.scale_reg_loss,
     "vconf": metrics.value_conf,
     "ventr": metrics.value_entropy,
@@ -184,23 +180,22 @@ with tf.Session(config=tfconfig) as session:
   }
 
   def validation_stats_str(vmetrics_evaled):
-    return "acc1 %f acc4 %f p0loss %f p1loss %f vloss %f smloss %f sbpdfloss %f sbcdfloss %f bbpdfloss %f bbcdfloss %f uvloss %f oloss %f rwlloss %f rsmloss %f rsdloss %f roloss %f rscloss %f vconf %f ventr %f" % (
+    return "acc1 %f acc4 %f p0loss %f p1loss %f vloss %f tdvloss %f smloss %f sbpdfloss %f sbcdfloss %f oloss %f sloss %f fploss %f skloss %f rsmloss %f rsdloss %f rscloss %f vconf %f ventr %f" % (
       vmetrics_evaled["acc1"] * 100 / vmetrics_evaled["wsum"],
       vmetrics_evaled["acc4"] * 100 / vmetrics_evaled["wsum"],
       vmetrics_evaled["p0loss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["p1loss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["vloss"] / vmetrics_evaled["wsum"],
+      vmetrics_evaled["tdvloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["smloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["sbpdfloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["sbcdfloss"] / vmetrics_evaled["wsum"],
-      vmetrics_evaled["bbpdfloss"] / vmetrics_evaled["wsum"],
-      vmetrics_evaled["bbcdfloss"] / vmetrics_evaled["wsum"],
-      vmetrics_evaled["uvloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["oloss"] / vmetrics_evaled["wsum"],
-      vmetrics_evaled["rwlloss"] / vmetrics_evaled["wsum"],
+      vmetrics_evaled["sloss"] / vmetrics_evaled["wsum"],
+      vmetrics_evaled["fploss"] / vmetrics_evaled["wsum"],
+      vmetrics_evaled["skloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["rsmloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["rsdloss"] / vmetrics_evaled["wsum"],
-      vmetrics_evaled["roloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["rscloss"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["vconf"] / vmetrics_evaled["wsum"],
       vmetrics_evaled["ventr"] / vmetrics_evaled["wsum"],

@@ -69,7 +69,9 @@ NNEvaluator::NNEvaluator(
   bool skipNeuralNet,
   float nnPolicyTemp,
   string openCLTunerFile,
-  bool openCLReTunePerBoardSize
+  bool openCLReTunePerBoardSize,
+  bool useFP16,
+  bool useNHWC
 )
   :modelName(mName),
    modelFileName(mFileName),
@@ -78,6 +80,8 @@ NNEvaluator::NNEvaluator(
    requireExactNNLen(rExactNNLen),
    policySize(NNPos::getPolicySize(xLen,yLen)),
    inputsUseNHWC(iUseNHWC),
+   usingFP16(useFP16),
+   usingNHWC(useNHWC),
    computeContext(NULL),
    loadedModel(NULL),
    nnCacheTable(NULL),
@@ -167,6 +171,9 @@ string NNEvaluator::getModelName() const {
 string NNEvaluator::getModelFileName() const {
   return modelFileName;
 }
+bool NNEvaluator::isNeuralNetLess() const {
+  return debugSkipNeuralNet;
+}
 int NNEvaluator::getMaxBatchSize() const {
   return maxNumRows;
 }
@@ -176,6 +183,14 @@ int NNEvaluator::getNNXLen() const {
 int NNEvaluator::getNNYLen() const {
   return nnYLen;
 }
+bool NNEvaluator::getUsingFP16() const {
+  return usingFP16;
+}
+bool NNEvaluator::getUsingNHWC() const {
+  return usingNHWC;
+}
+
+
 Rules NNEvaluator::getSupportedRules(const Rules& desiredRules, bool& supported) {
   if(loadedModel == NULL) {
     supported = true;
@@ -207,9 +222,7 @@ void NNEvaluator::clearCache() {
 static void serveEvals(
   int threadIdx, bool doRandomize, string randSeed, int defaultSymmetry, Logger* logger,
   NNEvaluator* nnEval, const LoadedModel* loadedModel,
-  int gpuIdxForThisThread,
-  bool useFP16,
-  bool useNHWC
+  int gpuIdxForThisThread, bool useFP16, bool useNHWC
 ) {
   NNServerBuf* buf = new NNServerBuf(*nnEval,loadedModel);
   Rand rand(randSeed + ":NNEvalServerThread:" + Global::intToString(threadIdx));
@@ -227,9 +240,7 @@ void NNEvaluator::spawnServerThreads(
   string randSeed,
   int defaultSymmetry,
   Logger& logger,
-  vector<int> gpuIdxByServerThread,
-  bool useFP16,
-  bool useNHWC
+  vector<int> gpuIdxByServerThread
 ) {
   if(serverThreads.size() != 0)
     throw StringError("NNEvaluator::spawnServerThreads called when threads were already running!");
@@ -239,7 +250,7 @@ void NNEvaluator::spawnServerThreads(
   for(int i = 0; i<numThreads; i++) {
     int gpuIdxForThisThread = gpuIdxByServerThread[i];
     std::thread* thread = new std::thread(
-      &serveEvals,i,doRandomize,randSeed,defaultSymmetry,&logger,this,loadedModel,gpuIdxForThisThread,useFP16,useNHWC
+      &serveEvals,i,doRandomize,randSeed,defaultSymmetry,&logger,this,loadedModel,gpuIdxForThisThread,usingFP16,usingNHWC
     );
     serverThreads.push_back(thread);
   }
@@ -363,11 +374,14 @@ void NNEvaluator::serve(
         double whiteScoreMean = 0.0 + rand.nextGaussian() * 0.20;
         double whiteScoreMeanSq = 0.0 + rand.nextGaussian() * 0.20;
         double whiteNoResultProb = 0.0 + rand.nextGaussian() * 0.20;
+        double varTimeLeft = 0.5 * boardXSize * boardYSize;
         resultBuf->result->whiteWinProb = (float)whiteWinProb;
         resultBuf->result->whiteLossProb = (float)whiteLossProb;
         resultBuf->result->whiteNoResultProb = (float)whiteNoResultProb;
         resultBuf->result->whiteScoreMean = (float)whiteScoreMean;
         resultBuf->result->whiteScoreMeanSq = (float)whiteScoreMeanSq;
+        resultBuf->result->whiteLead = (float)whiteScoreMean;
+        resultBuf->result->varTimeLeft = (float)varTimeLeft;
         resultBuf->hasResult = true;
         resultBuf->clientWaitingForResult.notify_all();
         resultLock.unlock();
@@ -438,11 +452,19 @@ void NNEvaluator::serve(
   NeuralNet::freeComputeHandle(gpuHandle);
 }
 
+static double softPlus(double x) {
+  //Avoid blowup
+  if(x > 40.0)
+    return x;
+  else
+    return log(1.0 + exp(x));
+}
+
 void NNEvaluator::evaluate(
   Board& board,
   const BoardHistory& history,
   Player nextPlayer,
-  double drawEquivalentWinsForWhite,
+  const MiscNNInputParams& nnInputParams,
   NNResultBuf& buf,
   Logger* logger,
   bool skipCache,
@@ -462,16 +484,7 @@ void NNEvaluator::evaluate(
                         " and requireExactNNLen, but was asked to evaluate board with different x or y size");
   }
 
-  static_assert(NNModelVersion::latestInputsVersionImplemented == 5, "");
-  Hash128 nnHash;
-  if(inputsVersion == 3)
-    nnHash = NNInputs::getHashV3(board, history, nextPlayer, drawEquivalentWinsForWhite);
-  else if(inputsVersion == 4)
-    nnHash = NNInputs::getHashV4(board, history, nextPlayer, drawEquivalentWinsForWhite);
-  else if(inputsVersion == 5)
-    nnHash = NNInputs::getHashV5(board, history, nextPlayer, drawEquivalentWinsForWhite);
-  else
-    ASSERT_UNREACHABLE;
+  Hash128 nnHash = NNInputs::getHash(board, history, nextPlayer, nnInputParams);
 
   bool hadResultWithoutOwnerMap = false;
   shared_ptr<NNOutput> resultWithoutOwnerMap;
@@ -512,16 +525,17 @@ void NNEvaluator::evaluate(
         throw StringError("Cannot reuse an nnResultBuf with different dimensions or model version");
     }
 
-    static_assert(NNModelVersion::latestInputsVersionImplemented == 5, "");
-    if(inputsVersion == 3) {
-      NNInputs::fillRowV3(board, history, nextPlayer, drawEquivalentWinsForWhite, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
-    }
-    else if(inputsVersion == 4) {
-      NNInputs::fillRowV4(board, history, nextPlayer, drawEquivalentWinsForWhite, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
-    }
-    else if(inputsVersion == 5) {
-      NNInputs::fillRowV5(board, history, nextPlayer, drawEquivalentWinsForWhite, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
-    }
+    static_assert(NNModelVersion::latestInputsVersionImplemented == 7, "");
+    if(inputsVersion == 3)
+      NNInputs::fillRowV3(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
+    else if(inputsVersion == 4)
+      NNInputs::fillRowV4(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
+    else if(inputsVersion == 5)
+      NNInputs::fillRowV5(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
+    else if(inputsVersion == 6)
+      NNInputs::fillRowV6(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
+    else if(inputsVersion == 7)
+      NNInputs::fillRowV7(board, history, nextPlayer, nnInputParams, nnXLen, nnYLen, inputsUseNHWC, buf.rowSpatial, buf.rowGlobal);
     else
       ASSERT_UNREACHABLE;
   }
@@ -562,6 +576,8 @@ void NNEvaluator::evaluate(
     buf.result->whiteNoResultProb = resultWithoutOwnerMap->whiteNoResultProb;
     buf.result->whiteScoreMean = resultWithoutOwnerMap->whiteScoreMean;
     buf.result->whiteScoreMeanSq = resultWithoutOwnerMap->whiteScoreMeanSq;
+    buf.result->whiteLead = resultWithoutOwnerMap->whiteLead;
+    buf.result->varTimeLeft = resultWithoutOwnerMap->varTimeLeft;
     std::copy(resultWithoutOwnerMap->policyProbs, resultWithoutOwnerMap->policyProbs + NNPos::MAX_NN_POLICY_SIZE, buf.result->policyProbs);
     buf.result->nnXLen = resultWithoutOwnerMap->nnXLen;
     buf.result->nnYLen = resultWithoutOwnerMap->nnYLen;
@@ -601,10 +617,10 @@ void NNEvaluator::evaluate(
       policySum += policy[i];
     }
 
-    if(isnan(policySum)) {
-      cout << "Got nan for policy sum" << endl;
+    if(!isfinite(policySum)) {
+      cout << "Got nonfinite for policy sum" << endl;
       history.printDebugInfo(cout,board);
-      throw StringError("Got nan for policy sum");
+      throw StringError("Got nonfinite for policy sum");
     }
 
     //Somehow all legal moves rounded to 0 probability
@@ -630,6 +646,7 @@ void NNEvaluator::evaluate(
 
     //Fix up the value as well. Note that the neural net gives us back the value from the perspective
     //of the player so we need to negate that to make it the white value.
+    static_assert(NNModelVersion::latestModelVersionImplemented == 8, "");
     if(modelVersion == 3) {
       const double twoOverPi = 0.63661977236758134308;
 
@@ -654,10 +671,10 @@ void NNEvaluator::evaluate(
         lossProb /= probSum;
         noResultProb /= probSum;
 
-        if(isnan(probSum) || isnan(scoreValue)) {
-          cout << "Got nan for nneval value" << endl;
+        if(!isfinite(probSum) || !isfinite(scoreValue)) {
+          cout << "Got nonfinite for nneval value" << endl;
           cout << winLogits << " " << lossLogits << " " << noResultLogits << " " << scoreValue << endl;
-          throw StringError("Got nan for nneval value");
+          throw StringError("Got nonfinite for nneval value");
         }
       }
 
@@ -667,6 +684,8 @@ void NNEvaluator::evaluate(
         buf.result->whiteNoResultProb = (float)noResultProb;
         buf.result->whiteScoreMean = (float)ScoreValue::approxWhiteScoreOfScoreValueSmooth(scoreValue,0.0,2.0,board);
         buf.result->whiteScoreMeanSq = buf.result->whiteScoreMean * buf.result->whiteScoreMean;
+        buf.result->whiteLead = buf.result->whiteScoreMean;
+        buf.result->varTimeLeft = -1;
       }
       else {
         buf.result->whiteWinProb = (float)lossProb;
@@ -674,21 +693,27 @@ void NNEvaluator::evaluate(
         buf.result->whiteNoResultProb = (float)noResultProb;
         buf.result->whiteScoreMean = -(float)ScoreValue::approxWhiteScoreOfScoreValueSmooth(scoreValue,0.0,2.0,board);
         buf.result->whiteScoreMeanSq = buf.result->whiteScoreMean * buf.result->whiteScoreMean;
+        buf.result->whiteLead = buf.result->whiteScoreMean;
+        buf.result->varTimeLeft = -1;
       }
 
     }
-    else if(modelVersion == 4 || modelVersion == 5 || modelVersion == 6) {
+    else if(modelVersion == 4 || modelVersion == 5 || modelVersion == 6 || modelVersion == 7 || modelVersion == 8) {
       double winProb;
       double lossProb;
       double noResultProb;
       double scoreMean;
       double scoreMeanSq;
+      double lead;
+      double varTimeLeft;
       {
         double winLogits = buf.result->whiteWinProb;
         double lossLogits = buf.result->whiteLossProb;
         double noResultLogits = buf.result->whiteNoResultProb;
         double scoreMeanPreScaled = buf.result->whiteScoreMean;
         double scoreStdevPreSoftplus = buf.result->whiteScoreMeanSq;
+        double leadPreScaled = buf.result->whiteLead;
+        double varTimeLeftPreSoftplus = buf.result->varTimeLeft;
 
         if(history.rules.koRule != Rules::KO_SIMPLE && history.rules.scoringRule != Rules::SCORING_TERRITORY)
           noResultLogits -= 100000.0;
@@ -708,26 +733,23 @@ void NNEvaluator::evaluate(
         noResultProb /= probSum;
 
         scoreMean = scoreMeanPreScaled * 20.0;
-
-        double scoreStdev;
-        //Avoid blowup
-        if(scoreStdevPreSoftplus > 40.0)
-          scoreStdev = scoreStdevPreSoftplus;
-        else
-          scoreStdev = log(1.0 + exp(scoreStdevPreSoftplus));
-        scoreStdev = scoreStdev * 20.0;
-
+        double scoreStdev = softPlus(scoreStdevPreSoftplus) * 20.0;
         scoreMeanSq = scoreMean * scoreMean + scoreStdev * scoreStdev;
+        lead = leadPreScaled * 20.0;
+        varTimeLeft = softPlus(varTimeLeftPreSoftplus) * 150.0;
 
         //scoreMean and scoreMeanSq are still conditional on having a result, we need to make them unconditional now
         //noResult counts as 0 score for scorevalue purposes.
         scoreMean = scoreMean * (1.0-noResultProb);
         scoreMeanSq = scoreMeanSq * (1.0-noResultProb);
+        lead = lead * (1.0-noResultProb);
 
-        if(isnan(probSum) || isnan(scoreMean) || isnan(scoreMeanSq)) {
-          cout << "Got nan for nneval value" << endl;
-          cout << winLogits << " " << lossLogits << " " << noResultLogits << " " << scoreMean << " " << scoreMeanSq << endl;
-          throw StringError("Got nan for nneval value");
+        if(!isfinite(probSum) || !isfinite(scoreMean) || !isfinite(scoreMeanSq) || !isfinite(lead) || !isfinite(varTimeLeft)) {
+          cout << "Got nonfinite for nneval value" << endl;
+          cout << winLogits << " " << lossLogits << " " << noResultLogits
+               << " " << scoreMean << " " << scoreMeanSq
+               << " " << lead << " " << varTimeLeft << endl;
+          throw StringError("Got nonfinite for nneval value");
         }
       }
 
@@ -737,6 +759,7 @@ void NNEvaluator::evaluate(
         buf.result->whiteNoResultProb = (float)noResultProb;
         buf.result->whiteScoreMean = (float)scoreMean;
         buf.result->whiteScoreMeanSq = (float)scoreMeanSq;
+        buf.result->whiteLead = (float)lead;
       }
       else {
         buf.result->whiteWinProb = (float)lossProb;
@@ -744,8 +767,13 @@ void NNEvaluator::evaluate(
         buf.result->whiteNoResultProb = (float)noResultProb;
         buf.result->whiteScoreMean = -(float)scoreMean;
         buf.result->whiteScoreMeanSq = (float)scoreMeanSq;
+        buf.result->whiteLead = -(float)lead;
       }
 
+      if(modelVersion >= 8)
+        buf.result->varTimeLeft = (float)varTimeLeft;
+      else
+        buf.result->varTimeLeft = -1;
     }
     else {
       throw StringError("NNEval value postprocessing not implemented for model version");
@@ -754,7 +782,7 @@ void NNEvaluator::evaluate(
 
   //Postprocess ownermap
   if(buf.result->whiteOwnerMap != NULL) {
-    if(modelVersion == 3 || modelVersion == 4 || modelVersion == 5 || modelVersion == 6) {
+    if(modelVersion == 3 || modelVersion == 4 || modelVersion == 5 || modelVersion == 6 || modelVersion == 7 || modelVersion == 8) {
       for(int pos = 0; pos<nnXLen*nnYLen; pos++) {
         int y = pos / nnXLen;
         int x = pos % nnXLen;

@@ -32,9 +32,9 @@ static const vector<string> knownCommands = {
   "undo",
 
   //GTP extension - specify rules
-  //TODO document this in gtp extensions once we support JP rules and also modify gtp.cfg
-  //to mention this, and also suggest that the config params are defaults since this command can override them
-  "set_rules",
+  "kata-get-rules",
+  "kata-set-rule",
+  "kata-set-rules",
 
   "genmove",
   "genmove_debug", //Prints additional info to stderr
@@ -54,6 +54,10 @@ static const vector<string> knownCommands = {
   "loadsgf",
 
   //GTP extensions for board analysis
+  // "genmove_analyze",
+  "lz-genmove_analyze",
+  "kata-genmove_analyze",
+  // "analyze",
   "lz-analyze",
   "kata-analyze",
 
@@ -65,34 +69,91 @@ static bool tryParseLoc(const string& s, const Board& b, Loc& loc) {
   return Location::tryOfString(s,b,loc);
 }
 
-static bool shouldResign(
-  const Board initialBoard,
-  const vector<Move>& moveHistory,
-  const Rules& rules,
-  Player pla,
-  const vector<double>& recentWinLossValues,
-  double expectedScore,
-  const double resignThreshold,
-  const int resignConsecTurns,
-  bool assumeMultipleStartingBlackMovesAreHandicap
-) {
+static double initialBlackAdvantage(const BoardHistory& hist) {
   //Assume an advantage of 15 * number of black stones beyond the one black normally gets on the first move and komi
-  int extraBlackStones = Play::numHandicapStones(initialBoard,moveHistory,assumeMultipleStartingBlackMovesAreHandicap);
+  int extraBlackStones = hist.computeNumHandicapStones();
   //Subtract one since white gets the first move afterward
   if(extraBlackStones > 0)
     extraBlackStones -= 1;
-  double handicapBlackAdvantage = 15.0 * extraBlackStones + (7.5 - rules.komi);
+  return 15.0 * extraBlackStones + (7.0 - hist.rules.komi);
+}
+
+static void updatePlayoutDoublingAdvantage(
+  AsyncBot* bot, const Board& board, const BoardHistory& hist, Player pla,
+  const double dynamicPlayoutDoublingAdvantageCapPerOppLead,
+  const vector<double>& recentWinLossValues,
+  double& desiredPlayoutDoublingAdvantage,
+  SearchParams& params
+) {
+  (void)board;
+  if(dynamicPlayoutDoublingAdvantageCapPerOppLead <= 0.0)
+    return;
+
+  double initialBlackAdvantageInPoints = initialBlackAdvantage(hist);
+  if(initialBlackAdvantageInPoints < 3.0 || pla != params.playoutDoublingAdvantagePla) {
+    desiredPlayoutDoublingAdvantage = 0.0;
+  }
+  else {
+    //What increment to adjust desiredPlayoutDoublingAdvantage at.
+    //Power of 2 to avoid any rounding issues.
+    const double increment = 0.125;
+
+    //Hard cap of 2.5 in this parameter, since more extreme values start to reach into values without good training.
+    //Scale mildly with board size - small board a given point lead counts as "more".
+    double pdaCap = std::min(
+      2.5,
+      dynamicPlayoutDoublingAdvantageCapPerOppLead * initialBlackAdvantageInPoints * pow(19.0 * 19.0 / (double)(board.x_size * board.y_size), 0.25)
+    );
+    pdaCap = round(pdaCap / increment) * increment;
+
+    //No history? Then this is a new game or a newly set position
+    if(recentWinLossValues.size() <= 0) {
+      //Just use the cap
+      desiredPlayoutDoublingAdvantage = pdaCap;
+    }
+    else {
+      double winLossValue = recentWinLossValues[recentWinLossValues.size()-1];
+      if(pla == P_BLACK)
+        winLossValue = -winLossValue;
+
+      //Keep winLossValue between 5% and 25%, subject to available caps.
+      if(winLossValue < -0.9)
+        desiredPlayoutDoublingAdvantage = desiredPlayoutDoublingAdvantage + 0.125;
+      else if(winLossValue > -0.5)
+        desiredPlayoutDoublingAdvantage = desiredPlayoutDoublingAdvantage - 0.125;
+
+      desiredPlayoutDoublingAdvantage = std::max(desiredPlayoutDoublingAdvantage, 0.0);
+      desiredPlayoutDoublingAdvantage = std::min(desiredPlayoutDoublingAdvantage, pdaCap);
+    }
+  }
+
+  if(params.playoutDoublingAdvantage != desiredPlayoutDoublingAdvantage) {
+    params.playoutDoublingAdvantage = desiredPlayoutDoublingAdvantage;
+    bot->setParams(params);
+  }
+}
+
+static bool shouldResign(
+  const Board& board,
+  const BoardHistory& hist,
+  Player pla,
+  const vector<double>& recentWinLossValues,
+  double lead,
+  const double resignThreshold,
+  const int resignConsecTurns
+) {
+  double initialBlackAdvantageInPoints = initialBlackAdvantage(hist);
 
   int minTurnForResignation = 0;
-  double noResignationWhenWhiteScoreAbove = initialBoard.x_size * initialBoard.y_size;
-  if(handicapBlackAdvantage > 0.9 && pla == P_WHITE) {
+  double noResignationWhenWhiteScoreAbove = board.x_size * board.y_size;
+  if(initialBlackAdvantageInPoints > 0.9 && pla == P_WHITE) {
     //Play at least some moves no matter what
-    minTurnForResignation = 1 + initialBoard.x_size * initialBoard.y_size / 5;
+    minTurnForResignation = 1 + board.x_size * board.y_size / 5;
 
-    //In a handicap game, also only resign if the expected score difference is well behind schedule assuming
+    //In a handicap game, also only resign if the lead difference is well behind schedule assuming
     //that we're supposed to catch up over many moves.
-    double numTurnsToCatchUp = 0.60 * initialBoard.x_size * initialBoard.y_size - minTurnForResignation;
-    double numTurnsSpent = (double)(moveHistory.size()) - minTurnForResignation;
+    double numTurnsToCatchUp = 0.60 * board.x_size * board.y_size - minTurnForResignation;
+    double numTurnsSpent = (double)(hist.moveHistory.size()) - minTurnForResignation;
     if(numTurnsToCatchUp <= 1.0)
       numTurnsToCatchUp = 1.0;
     if(numTurnsSpent <= 0.0)
@@ -100,16 +161,16 @@ static bool shouldResign(
     if(numTurnsSpent > numTurnsToCatchUp)
       numTurnsSpent = numTurnsToCatchUp;
 
-    double resignScore = -handicapBlackAdvantage * ((numTurnsToCatchUp - numTurnsSpent) / numTurnsToCatchUp);
+    double resignScore = -initialBlackAdvantageInPoints * ((numTurnsToCatchUp - numTurnsSpent) / numTurnsToCatchUp);
     resignScore -= 5.0; //Always require at least a 5 point buffer
-    resignScore -= handicapBlackAdvantage * 0.15; //And also require a 15% of the initial handicap
+    resignScore -= initialBlackAdvantageInPoints * 0.15; //And also require a 15% of the initial handicap
 
     noResignationWhenWhiteScoreAbove = resignScore;
   }
 
-  if(moveHistory.size() < minTurnForResignation)
+  if(hist.moveHistory.size() < minTurnForResignation)
     return false;
-  if(pla == P_WHITE && expectedScore > noResignationWhenWhiteScoreAbove)
+  if(pla == P_WHITE && lead > noResignationWhenWhiteScoreAbove)
     return false;
   if(resignConsecTurns > recentWinLossValues.size())
     return false;
@@ -138,6 +199,8 @@ static void printGenmoveLog(ostream& out, const AsyncBot* bot, const NNEvaluator
   out << "NN rows: " << nnEval->numRowsProcessed() << endl;
   out << "NN batches: " << nnEval->numBatchesProcessed() << endl;
   out << "NN avg batch size: " << nnEval->averageProcessedBatchSize() << endl;
+  if(search->searchParams.playoutDoublingAdvantage != 0)
+    out << "PlayoutDoublingAdvantage: " << search->searchParams.playoutDoublingAdvantage << endl;
   out << "PV: ";
   search->printPV(out, search->rootNode, 25);
   out << "\n";
@@ -150,14 +213,15 @@ struct GTPEngine {
   GTPEngine& operator=(const GTPEngine&) = delete;
 
   const string nnModelFile;
-  const double whiteBonusPerHandicapStone;
   const bool assumeMultipleStartingBlackMovesAreHandicap;
   const int analysisPVLen;
+  const bool preventEncore;
+  const double dynamicPlayoutDoublingAdvantageCapPerOppLead;
 
   NNEvaluator* nnEval;
   AsyncBot* bot;
+  Rules currentRules; //Should always be the same as the rules in bot, if bot is not NULL.
 
-  Rules baseRules; //Note that komi here is PRE-hacking where we account for handicap stones and such
   SearchParams params;
   TimeControls bTimeControls;
   TimeControls wTimeControls;
@@ -170,21 +234,23 @@ struct GTPEngine {
 
   vector<double> recentWinLossValues;
   double lastSearchFactor;
+  double desiredPlayoutDoublingAdvantage;
 
   Player perspective;
 
   GTPEngine(
     const string& modelFile, SearchParams initialParams, Rules initialRules,
-    double wBonusPerHandicapStone, bool assumeMultiBlackHandicap,
+    bool assumeMultiBlackHandicap, bool prevtEncore, double dynamicPDACapPerOppLead,
     Player persp, int pvLen
   )
     :nnModelFile(modelFile),
-     whiteBonusPerHandicapStone(wBonusPerHandicapStone),
      assumeMultipleStartingBlackMovesAreHandicap(assumeMultiBlackHandicap),
      analysisPVLen(pvLen),
+     preventEncore(prevtEncore),
+     dynamicPlayoutDoublingAdvantageCapPerOppLead(dynamicPDACapPerOppLead),
      nnEval(NULL),
      bot(NULL),
-     baseRules(initialRules),
+     currentRules(initialRules),
      params(initialParams),
      bTimeControls(),
      wTimeControls(),
@@ -207,8 +273,8 @@ struct GTPEngine {
     bot->stopAndWait();
   }
 
-  Rules getBaseRules() {
-    return baseRules;
+  Rules getCurrentRules() {
+    return currentRules;
   }
 
   //Specify -1 for the sizes for a default
@@ -241,9 +307,9 @@ struct GTPEngine {
 
     {
       bool rulesWereSupported;
-      nnEval->getSupportedRules(baseRules,rulesWereSupported);
+      nnEval->getSupportedRules(currentRules,rulesWereSupported);
       if(!rulesWereSupported) {
-        throw StringError("Rules " + baseRules.toString() + " from config file " + cfg.getFileName() + " are NOT supported by neural net");
+        throw StringError("Rules " + currentRules.toJsonStringNoKomi() + " from config file " + cfg.getFileName() + " are NOT supported by neural net");
       }
     }
 
@@ -264,70 +330,61 @@ struct GTPEngine {
 
     Board board(boardXSize,boardYSize);
     Player pla = P_BLACK;
-    BoardHistory hist(board,pla,baseRules,0);
+    BoardHistory hist(board,pla,currentRules,0);
     vector<Move> newMoveHistory;
-    setPositionAndRulesExceptKomi(pla,board,hist,board,pla,newMoveHistory);
+    setPositionAndRules(pla,board,hist,board,pla,newMoveHistory);
   }
 
-  //IGNORES the komi in hist's rules, but otherwise adopts its rules
-  void setPositionAndRulesExceptKomi(Player pla, const Board& board, const BoardHistory& hist, const Board& newInitialBoard, Player newInitialPla, const vector<Move> newMoveHistory) {
-    //Swap in the new rules, except for the komi
-    Rules r = hist.rules;
-    r.komi = baseRules.komi;
-    baseRules = r;
-
+  void setPositionAndRules(Player pla, const Board& board, const BoardHistory& hist, const Board& newInitialBoard, Player newInitialPla, const vector<Move> newMoveHistory) {
+    currentRules = hist.rules;
     bot->setPosition(pla,board,hist);
     initialBoard = newInitialBoard;
     initialPla = newInitialPla;
     moveHistory = newMoveHistory;
     recentWinLossValues.clear();
-
-    //This call will re-override whatever komi that bot->setPosition put in for the bot.
-    updateKomiIfNew(baseRules.komi);
+    updatePlayoutDoublingAdvantage(
+      bot,board,hist,params.playoutDoublingAdvantagePla,
+      dynamicPlayoutDoublingAdvantageCapPerOppLead,
+      recentWinLossValues,
+      desiredPlayoutDoublingAdvantage,params
+    );
   }
 
   void clearBoard() {
+    assert(bot->getRootHist().rules == currentRules);
     int newXSize = bot->getRootBoard().x_size;
     int newYSize = bot->getRootBoard().y_size;
     Board board(newXSize,newYSize);
     Player pla = P_BLACK;
-    BoardHistory hist(board,pla,bot->getRootHist().rules,0);
+    BoardHistory hist(board,pla,currentRules,0);
     vector<Move> newMoveHistory;
-    setPositionAndRulesExceptKomi(pla,board,hist,board,pla,newMoveHistory);
+    setPositionAndRules(pla,board,hist,board,pla,newMoveHistory);
   }
 
-  void updateKomiIfNew(float newUnhackedKomi) {
-    //Komi without whiteBonusPerHandicapStone hack
-    baseRules.komi = newUnhackedKomi;
-
-    float newKomi = baseRules.komi;
-    int nHandicapStones = Play::numHandicapStones(initialBoard,moveHistory,assumeMultipleStartingBlackMovesAreHandicap);
-    newKomi += (float)(nHandicapStones * whiteBonusPerHandicapStone);
-    if(newKomi != bot->getRootHist().rules.komi)
-      recentWinLossValues.clear();
+  void updateKomiIfNew(float newKomi) {
     bot->setKomiIfNew(newKomi);
+    currentRules.komi = newKomi;
   }
 
   bool play(Loc loc, Player pla) {
-    bool suc = bot->makeMove(loc,pla);
+    assert(bot->getRootHist().rules == currentRules);
+    bool suc = bot->makeMove(loc,pla,preventEncore);
     if(suc)
       moveHistory.push_back(Move(loc,pla));
-
-    //Black consecutive moves at the start can change the "handicap" which can cause us to adjust komi
-    updateKomiIfNew(baseRules.komi);
     return suc;
   }
 
   bool undo() {
     if(moveHistory.size() <= 0)
       return false;
+    assert(bot->getRootHist().rules == currentRules);
 
     vector<Move> moveHistoryCopy = moveHistory;
 
     Board undoneBoard = initialBoard;
-    BoardHistory undoneHist(undoneBoard,initialPla,bot->getRootHist().rules,0);
+    BoardHistory undoneHist(undoneBoard,initialPla,currentRules,0);
     vector<Move> emptyMoveHistory;
-    setPositionAndRulesExceptKomi(initialPla,undoneBoard,undoneHist,initialBoard,initialPla,emptyMoveHistory);
+    setPositionAndRules(initialPla,undoneBoard,undoneHist,initialBoard,initialPla,emptyMoveHistory);
 
     for(int i = 0; i<moveHistoryCopy.size()-1; i++) {
       Loc moveLoc = moveHistoryCopy[i].loc;
@@ -341,12 +398,13 @@ struct GTPEngine {
 
   bool setRulesNotIncludingKomi(Rules newRules, string& error) {
     assert(nnEval != NULL);
-    newRules.komi = baseRules.komi;
+    assert(bot->getRootHist().rules == currentRules);
+    newRules.komi = currentRules.komi;
 
     bool rulesWereSupported;
     nnEval->getSupportedRules(newRules,rulesWereSupported);
     if(!rulesWereSupported) {
-      error = "Rules " + newRules.toString() + " are not supported by this neural net version";
+      error = "Rules " + newRules.toJsonStringNoKomi() + " are not supported by this neural net version";
       return false;
     }
 
@@ -355,7 +413,7 @@ struct GTPEngine {
     Board board = initialBoard;
     BoardHistory hist(board,initialPla,newRules,0);
     vector<Move> emptyMoveHistory;
-    setPositionAndRulesExceptKomi(initialPla,board,hist,initialBoard,initialPla,emptyMoveHistory);
+    setPositionAndRules(initialPla,board,hist,initialBoard,initialPla,emptyMoveHistory);
 
     for(int i = 0; i<moveHistoryCopy.size(); i++) {
       Loc moveLoc = moveHistoryCopy[i].loc;
@@ -377,13 +435,170 @@ struct GTPEngine {
     bot->ponder(lastSearchFactor);
   }
 
+  struct AnalyzeArgs {
+    bool analyzing = false;
+    bool lz = false;
+    bool kata = false;
+    int minMoves = 0;
+    int maxMoves = 10000000;
+    bool showOwnership = false;
+    double secondsPerReport = 1e30;
+  };
+
+  std::function<void(Search* search)> getAnalyzeCallback(Player pla, AnalyzeArgs args) {
+    std::function<void(Search* search)> callback;
+    //analyze
+    if(!args.kata && !args.lz) {
+      callback = [args,pla,this](Search* search) {
+        vector<AnalysisData> buf;
+        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen);
+        if(buf.size() > args.maxMoves)
+          buf.resize(args.maxMoves);
+        if(buf.size() <= 0)
+          return;
+
+        const Board board = search->getRootBoard();
+        for(int i = 0; i<buf.size(); i++) {
+          if(i > 0)
+            cout << " ";
+          const AnalysisData& data = buf[i];
+          double winrate = 0.5 * (1.0 + data.winLossValue);
+          if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
+            winrate = 1.0-winrate;
+          }
+          cout << "info";
+          cout << " move " << Location::toString(data.move,board);
+          cout << " visits " << data.numVisits;
+          cout << " winrate " << round(winrate * 10000.0);
+          cout << " order " << data.order;
+        }
+        cout << endl;
+      };
+    }
+    //lz-analyze
+    else if(!args.kata) {
+      callback = [args,pla,this](Search* search) {
+        vector<AnalysisData> buf;
+        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen);
+        if(buf.size() > args.maxMoves)
+          buf.resize(args.maxMoves);
+        if(buf.size() <= 0)
+          return;
+
+        const Board board = search->getRootBoard();
+        for(int i = 0; i<buf.size(); i++) {
+          if(i > 0)
+            cout << " ";
+          const AnalysisData& data = buf[i];
+          double winrate = 0.5 * (1.0 + data.winLossValue);
+          double lcb = Play::getHackedLCBForWinrate(search,data,pla);
+          if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
+            winrate = 1.0-winrate;
+            lcb = 1.0 - lcb;
+          }
+          cout << "info";
+          cout << " move " << Location::toString(data.move,board);
+          cout << " visits " << data.numVisits;
+          cout << " winrate " << round(winrate * 10000.0);
+          cout << " prior " << round(data.policyPrior * 10000.0);
+          cout << " lcb " << round(lcb * 10000.0);
+          cout << " order " << data.order;
+          cout << " pv ";
+          if(preventEncore && data.pvContainsPass())
+            data.writePVUpToPhaseEnd(cout,board,search->getRootHist(),search->getRootPla());
+          else
+            data.writePV(cout,board);
+        }
+        cout << endl;
+      };
+    }
+    //kata-analyze
+    else {
+      callback = [args,pla,this](Search* search) {
+        vector<AnalysisData> buf;
+        search->getAnalysisData(buf,args.minMoves,false,analysisPVLen);
+        if(buf.size() > args.maxMoves)
+          buf.resize(args.maxMoves);
+        if(buf.size() <= 0)
+          return;
+
+        vector<double> ownership;
+        if(args.showOwnership) {
+          static constexpr int64_t ownershipMinVisits = 3;
+          ownership = search->getAverageTreeOwnership(ownershipMinVisits);
+        }
+
+        const Board board = search->getRootBoard();
+        for(int i = 0; i<buf.size(); i++) {
+          if(i > 0)
+            cout << " ";
+          const AnalysisData& data = buf[i];
+          double winrate = 0.5 * (1.0 + data.winLossValue);
+          double utility = data.utility;
+          //We still hack the LCB for consistency with LZ-analyze
+          double lcb = Play::getHackedLCBForWinrate(search,data,pla);
+          ///But now we also offer the proper LCB that KataGo actually uses.
+          double utilityLcb = data.lcb;
+          double scoreMean = data.scoreMean;
+          double lead = data.lead;
+          if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
+            winrate = 1.0-winrate;
+            lcb = 1.0 - lcb;
+            utility = -utility;
+            scoreMean = -scoreMean;
+            lead = -lead;
+            utilityLcb = -utilityLcb;
+          }
+          cout << "info";
+          cout << " move " << Location::toString(data.move,board);
+          cout << " visits " << data.numVisits;
+          cout << " utility " << utility;
+          cout << " winrate " << winrate;
+          cout << " scoreMean " << lead;
+          cout << " scoreStdev " << data.scoreStdev;
+          cout << " scoreLead " << lead;
+          cout << " scoreSelfplay " << scoreMean;
+          cout << " prior " << data.policyPrior;
+          cout << " lcb " << lcb;
+          cout << " utilityLcb " << utilityLcb;
+          cout << " order " << data.order;
+          cout << " pv ";
+          if(preventEncore && data.pvContainsPass())
+            data.writePVUpToPhaseEnd(cout,board,search->getRootHist(),search->getRootPla());
+          else
+            data.writePV(cout,board);
+        }
+
+        if(args.showOwnership) {
+          cout << " ";
+
+          cout << "ownership";
+          int nnXLen = search->nnXLen;
+          for(int y = 0; y<board.y_size; y++) {
+            for(int x = 0; x<board.x_size; x++) {
+              int pos = NNPos::xyToPos(x,y,nnXLen);
+              if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK))
+                cout << " " << -ownership[pos];
+              else
+                cout << " " << ownership[pos];
+            }
+          }
+        }
+
+        cout << endl;
+      };
+    }
+    return callback;
+  }
+
   void genMove(
     Player pla,
     Logger& logger, double searchFactorWhenWinningThreshold, double searchFactorWhenWinning,
     bool cleanupBeforePass, bool ogsChatToStderr,
     bool allowResignation, double resignThreshold, int resignConsecTurns,
     bool logSearchInfo, bool debug, bool playChosenMove,
-    string& response, bool& responseIsError, bool& maybeStartPondering
+    string& response, bool& responseIsError, bool& maybeStartPondering,
+    AnalyzeArgs args
   ) {
     response = "";
     responseIsError = false;
@@ -393,11 +608,32 @@ struct GTPEngine {
     nnEval->clearStats();
     TimeControls tc = pla == P_BLACK ? bTimeControls : wTimeControls;
 
+    //Make sure we have the right PDA parameters, in case someone ran analysis in the meantime.
+    if(dynamicPlayoutDoublingAdvantageCapPerOppLead != 0.0 &&
+       params.playoutDoublingAdvantage != desiredPlayoutDoublingAdvantage) {
+      params.playoutDoublingAdvantage = desiredPlayoutDoublingAdvantage;
+      bot->setParams(params);
+    }
+
     //Play faster when winning
     double searchFactor = Play::getSearchFactor(searchFactorWhenWinningThreshold,searchFactorWhenWinning,params,recentWinLossValues,pla);
     lastSearchFactor = searchFactor;
 
-    Loc moveLoc = bot->genMoveSynchronous(pla,tc,searchFactor);
+    Loc moveLoc;
+    if(args.analyzing) {
+      std::function<void(Search* search)> callback = getAnalyzeCallback(pla,args);
+      if(args.showOwnership)
+        bot->setAlwaysIncludeOwnerMap(true);
+      else
+        bot->setAlwaysIncludeOwnerMap(false);
+      moveLoc = bot->genMoveSynchronousAnalyze(pla, tc, searchFactor, args.secondsPerReport, callback);
+      //Make sure callback happens at least once
+      callback(bot->getSearch());
+    }
+    else {
+      moveLoc = bot->genMoveSynchronous(pla,tc,searchFactor);
+    }
+
     bool isLegal = bot->isLegalStrict(moveLoc,pla);
     if(moveLoc == Board::NULL_LOC || !isLegal) {
       responseIsError = true;
@@ -412,7 +648,8 @@ struct GTPEngine {
     }
 
     //Implement cleanupBeforePass hack - the bot wants to pass, so instead cleanup if there is something to clean
-    if(cleanupBeforePass && moveLoc == Board::PASS_LOC) {
+    //Make sure we only do it though when it makes sense to do so.
+    if(cleanupBeforePass && moveLoc == Board::PASS_LOC && bot->getRootHist().isFinalPhase()) {
       Board board = bot->getRootBoard();
       BoardHistory hist = bot->getRootHist();
       Color* safeArea = bot->getSearch()->rootSafeArea;
@@ -435,47 +672,37 @@ struct GTPEngine {
 
     ReportedSearchValues values;
     double winLossValue;
-    double expectedScore;
+    double lead;
     {
       values = bot->getSearch()->getRootValuesAssertSuccess();
       winLossValue = values.winLossValue;
-      expectedScore = values.expectedScore;
+      lead = values.lead;
     }
 
     double timeTaken = timer.getSeconds();
 
-    //-------------------------------
+    //Chatting and logging ----------------------------
 
-    //Chat
     if(ogsChatToStderr) {
       int64_t visits = bot->getSearch()->getRootVisits();
       double winrate = 0.5 * (1.0 + (values.winValue - values.lossValue));
+      double leadForPrinting = lead;
       //Print winrate from desired perspective
       if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
         winrate = 1.0 - winrate;
-        expectedScore = -expectedScore;
+        leadForPrinting = -leadForPrinting;
       }
       cerr << "CHAT:"
            << "Visits " << visits
            << " Winrate " << Global::strprintf("%.2f%%", winrate * 100.0)
-           << " ScoreMean " << Global::strprintf("%.1f", expectedScore)
+           << " ScoreLead " << Global::strprintf("%.1f", leadForPrinting)
            << " ScoreStdev " << Global::strprintf("%.1f", values.expectedScoreStdev);
+      if(params.playoutDoublingAdvantage != 0.0)
+        cerr << Global::strprintf(" (PDA %.2f)", params.playoutDoublingAdvantage);
       cerr << " PV ";
       bot->getSearch()->printPVForMove(cerr,bot->getSearch()->rootNode, moveLoc, analysisPVLen);
       cerr << endl;
     }
-
-    recentWinLossValues.push_back(winLossValue);
-
-    bool resigned = allowResignation && shouldResign(
-      initialBoard,moveHistory,bot->getRootHist().rules,pla,recentWinLossValues,expectedScore,
-      resignThreshold,resignConsecTurns,assumeMultipleStartingBlackMovesAreHandicap
-    );
-
-    if(resigned)
-      response = "resign";
-    else
-      response = Location::toString(moveLoc,bot->getRootBoard());
 
     if(logSearchInfo) {
       ostringstream sout;
@@ -486,17 +713,39 @@ struct GTPEngine {
       printGenmoveLog(cerr,bot,nnEval,moveLoc,timeTaken,perspective);
     }
 
+    //Adjust handicap games ------------------------
+    recentWinLossValues.push_back(winLossValue);
+    updatePlayoutDoublingAdvantage(
+      bot,bot->getRootBoard(),bot->getRootHist(),pla,
+      dynamicPlayoutDoublingAdvantageCapPerOppLead,
+      recentWinLossValues,
+      desiredPlayoutDoublingAdvantage,params
+    );
+
+    //Resignation, actual reporting of chosen move---------------------
+
+    bool resigned = allowResignation && shouldResign(
+      bot->getRootBoard(),bot->getRootHist(),pla,recentWinLossValues,lead,
+      resignThreshold,resignConsecTurns
+    );
+
+    if(resigned)
+      response = "resign";
+    else
+      response = Location::toString(moveLoc,bot->getRootBoard());
+
     if(!resigned && moveLoc != Board::NULL_LOC && isLegal && playChosenMove) {
-      bool suc = bot->makeMove(moveLoc,pla);
+      bool suc = bot->makeMove(moveLoc,pla,preventEncore);
       if(suc)
         moveHistory.push_back(Move(moveLoc,pla));
       assert(suc);
       (void)suc; //Avoid warning when asserts are off
 
-      //Black consecutive moves at the start can change the "handicap" which can cause us to adjust komi
-      updateKomiIfNew(baseRules.komi);
-
       maybeStartPondering = true;
+    }
+
+    if(args.analyzing) {
+      response = "play " + response;
     }
     return;
   }
@@ -506,7 +755,7 @@ struct GTPEngine {
     nnEval->clearCache();
   }
 
-  void placeFreeHandicap(int n, Logger& logger, string& response, bool& responseIsError) {
+  void placeFreeHandicap(int n, string& response, bool& responseIsError) {
     //If asked to place more, we just go ahead and only place up to 30, or a quarter of the board
     int xSize = bot->getRootBoard().x_size;
     int ySize = bot->getRootBoard().y_size;
@@ -516,22 +765,18 @@ struct GTPEngine {
     if(n > maxHandicap)
       n = maxHandicap;
 
+    assert(bot->getRootHist().rules == currentRules);
+
     Board board(xSize,ySize);
     Player pla = P_BLACK;
-    BoardHistory hist(board,pla,bot->getRootHist().rules,0);
+    BoardHistory hist(board,pla,currentRules,0);
     double extraBlackTemperature = 0.25;
-    bool adjustKomi = false;
-    int numVisitsForKomi = 0;
     Rand rand;
-    ExtraBlackAndKomi extraBlackAndKomi(n,hist.rules.komi,hist.rules.komi);
-    Play::playExtraBlack(bot->getSearch(), logger, extraBlackAndKomi, board, hist, extraBlackTemperature, rand, adjustKomi, numVisitsForKomi);
-
+    Play::playExtraBlack(bot->getSearch(), n, board, hist, extraBlackTemperature, rand);
     //Also switch the initial player, expecting white should be next.
-    {
-      Rules rules = hist.rules;
-      hist.clear(board,P_WHITE,rules,0);
-      pla = P_WHITE;
-    }
+    hist.clear(board,P_WHITE,currentRules,0);
+    hist.setAssumeMultipleStartingBlackMovesAreHandicap(assumeMultipleStartingBlackMovesAreHandicap);
+    pla = P_WHITE;
 
     response = "";
     for(int y = 0; y<board.y_size; y++) {
@@ -546,126 +791,123 @@ struct GTPEngine {
     (void)responseIsError;
 
     vector<Move> newMoveHistory;
-    setPositionAndRulesExceptKomi(pla,board,hist,board,pla,newMoveHistory);
+    setPositionAndRules(pla,board,hist,board,pla,newMoveHistory);
   }
 
-  void analyze(Player pla, bool kata, double secondsPerReport, int minMoves, bool showOwnership) {
-
-    std::function<void(Search* search)> callback;
-
-    //lz-analyze
-    if(!kata) {
-      callback = [minMoves,pla,this](Search* search) {
-        vector<AnalysisData> buf;
-        search->getAnalysisData(buf,minMoves,false,analysisPVLen);
-        if(buf.size() <= 0)
-          return;
-
-        const Board board = search->getRootBoard();
-        for(int i = 0; i<buf.size(); i++) {
-          if(i > 0)
-            cout << " ";
-          const AnalysisData& data = buf[i];
-          double winrate = 0.5 * (1.0 + data.winLossValue);
-          double lcb = Play::getHackedLCBForWinrate(search,data,pla);
-          if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
-            winrate = 1.0-winrate;
-            lcb = 1.0 - lcb;
-          }
-          cout << "info";
-          cout << " move " << Location::toString(data.move,board);
-          cout << " visits " << data.numVisits;
-          cout << " winrate " << round(winrate * 10000.0);
-          cout << " prior " << round(data.policyPrior * 10000.0);
-          cout << " lcb " << round(lcb * 10000.0);
-          cout << " order " << data.order;
-          cout << " pv";
-          for(int j = 0; j<data.pv.size(); j++)
-            cout << " " << Location::toString(data.pv[j],board);
-        }
-        cout << endl;
-      };
-    }
-    //kata-analyze
-    else {
-      callback = [minMoves,pla,showOwnership,this](Search* search) {
-        vector<AnalysisData> buf;
-        search->getAnalysisData(buf,minMoves,false,analysisPVLen);
-        if(buf.size() <= 0)
-          return;
-
-        vector<double> ownership;
-        if(showOwnership) {
-          static constexpr int ownershipMinVisits = 3;
-          ownership = search->getAverageTreeOwnership(ownershipMinVisits);
-        }
-
-        const Board board = search->getRootBoard();
-        for(int i = 0; i<buf.size(); i++) {
-          if(i > 0)
-            cout << " ";
-          const AnalysisData& data = buf[i];
-          double winrate = 0.5 * (1.0 + data.winLossValue);
-          double utility = data.utility;
-          //We still hack the LCB for consistency with LZ-analyze
-          double lcb = Play::getHackedLCBForWinrate(search,data,pla);
-          ///But now we also offer the proper LCB that KataGo actually uses.
-          double utilityLcb = data.lcb;
-          double scoreMean = data.scoreMean;
-          if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK)) {
-            winrate = 1.0-winrate;
-            lcb = 1.0 - lcb;
-            utility = -utility;
-            scoreMean = -scoreMean;
-            utilityLcb = -utilityLcb;
-          }
-          cout << "info";
-          cout << " move " << Location::toString(data.move,board);
-          cout << " visits " << data.numVisits;
-          cout << " utility " << utility;
-          cout << " radius " << data.radius;
-          cout << " winrate " << winrate;
-          cout << " scoreMean " << scoreMean;
-          cout << " scoreStdev " << data.scoreStdev;
-          cout << " prior " << data.policyPrior;
-          cout << " lcb " << lcb;
-          cout << " utilityLcb " << utilityLcb;
-          cout << " order " << data.order;
-          cout << " pv";
-          for(int j = 0; j<data.pv.size(); j++)
-            cout << " " << Location::toString(data.pv[j],board);
-        }
-
-        if(showOwnership) {
-          cout << " ";
-
-          cout << "ownership";
-          int nnXLen = search->nnXLen;
-          for(int y = 0; y<board.y_size; y++) {
-            for(int x = 0; x<board.x_size; x++) {
-              int pos = NNPos::xyToPos(x,y,nnXLen);
-              if(perspective == P_BLACK || (perspective != P_BLACK && perspective != P_WHITE && pla == P_BLACK))
-                cout << " " << -ownership[pos];
-              else
-                cout << " " << ownership[pos];
-            }
-          }
-        }
-
-        cout << endl;
-      };
+  void analyze(Player pla, AnalyzeArgs args) {
+    assert(args.analyzing);
+    //In dynamic mode, analysis should ALWAYS be with 0.0, to prevent random hard-to-predict changes
+    //for users.
+    if(dynamicPlayoutDoublingAdvantageCapPerOppLead != 0.0 && params.playoutDoublingAdvantage != 0.0) {
+      params.playoutDoublingAdvantage = 0.0;
+      bot->setParams(params);
     }
 
-    if(showOwnership)
+    std::function<void(Search* search)> callback = getAnalyzeCallback(pla,args);
+    if(args.showOwnership)
       bot->setAlwaysIncludeOwnerMap(true);
     else
       bot->setAlwaysIncludeOwnerMap(false);
 
     double searchFactor = 1e40; //go basically forever
-    bot->analyze(pla, searchFactor, secondsPerReport, callback);
+    bot->analyze(pla, searchFactor, args.secondsPerReport, callback);
   }
 
 };
+
+
+//User should pre-fill pla with a default value, as it will not get filled in if the parsed command doesn't specify
+static GTPEngine::AnalyzeArgs parseAnalyzeCommand(const string& command, const vector<string>& pieces, Player& pla, bool& parseFailed) {
+  int numArgsParsed = 0;
+
+  bool isLZ = (command == "lz-analyze" || command == "lz-genmove_analyze");
+  bool isKata = (command == "kata-analyze" || command == "kata-genmove_analyze");
+  double lzAnalyzeInterval = 1e30;
+  int minMoves = 0;
+  int maxMoves = 10000000;
+  bool showOwnership = false;
+
+  parseFailed = false;
+
+  //Format:
+  //lz-analyze [optional player] [optional interval float] <keys and values>
+  //Keys and values consists of zero or more of:
+
+  //interval <float interval in centiseconds>
+  //avoid <player> <comma-separated moves> <until movenum>
+  //minmoves <int min number of moves to show>
+  //maxmoves <int max number of moves to show>
+  //ownership <bool whether to show ownership or not>
+
+  //Parse optional player
+  if(pieces.size() > numArgsParsed && PlayerIO::tryParsePlayer(pieces[numArgsParsed],pla))
+    numArgsParsed += 1;
+
+  //Parse optional interval float
+  if(pieces.size() > numArgsParsed &&
+     Global::tryStringToDouble(pieces[numArgsParsed],lzAnalyzeInterval) &&
+     !isnan(lzAnalyzeInterval) && lzAnalyzeInterval >= 0 && lzAnalyzeInterval < 1e20)
+    numArgsParsed += 1;
+
+  //Now loop and handle all key value pairs
+  while(pieces.size() > numArgsParsed) {
+    const string& key = pieces[numArgsParsed];
+    numArgsParsed += 1;
+    //Make sure we have a value. If not, then we fail.
+    if(pieces.size() <= numArgsParsed) {
+      parseFailed = true;
+      break;
+    }
+
+    const string& value = pieces[numArgsParsed];
+    numArgsParsed += 1;
+
+    if(key == "interval" && Global::tryStringToDouble(value,lzAnalyzeInterval) &&
+       !isnan(lzAnalyzeInterval) && lzAnalyzeInterval >= 0 && lzAnalyzeInterval < 1e20) {
+      continue;
+    }
+    //Parse it but ignore it since we don't support excluding moves right now
+    else if(key == "avoid" || key == "allow") {
+      //Parse two more arguments, and ignore them
+      if(pieces.size() <= numArgsParsed+1) {
+        parseFailed = true;
+        break;
+      }
+      const string& moves = pieces[numArgsParsed];
+      (void)moves;
+      numArgsParsed += 1;
+      const string& untilMove = pieces[numArgsParsed];
+      (void)untilMove;
+      numArgsParsed += 1;
+      continue;
+    }
+    else if(key == "minmoves" && Global::tryStringToInt(value,minMoves) &&
+            minMoves >= 0 && minMoves < 1000000000) {
+      continue;
+    }
+    else if(key == "maxmoves" && Global::tryStringToInt(value,maxMoves) &&
+            maxMoves >= 0 && maxMoves < 1000000000) {
+      continue;
+    }
+    else if(isKata && key == "ownership" && Global::tryStringToBool(value,showOwnership)) {
+      continue;
+    }
+
+    parseFailed = true;
+    break;
+  }
+
+  GTPEngine::AnalyzeArgs args = GTPEngine::AnalyzeArgs();
+  args.analyzing = true;
+  args.lz = isLZ;
+  args.kata = isKata;
+  //Convert from centiseconds to seconds
+  args.secondsPerReport = lzAnalyzeInterval * 0.01;
+  args.minMoves = minMoves;
+  args.maxMoves = maxMoves;
+  args.showOwnership = showOwnership;
+  return args;
+}
 
 
 int MainCmds::gtp(int argc, const char* const* argv) {
@@ -718,28 +960,22 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     cerr << Version::getKataGoVersionForHelp() << endl;
   }
 
-  Rules initialRules;
-  {
-    string koRule = cfg.getString("koRule", Rules::koRuleStrings());
-    string scoringRule = cfg.getString("scoringRule", Rules::scoringRuleStrings());
-    bool multiStoneSuicideLegal = cfg.getBool("multiStoneSuicideLegal");
-    float komi = 7.5f; //Default komi, gtp will generally override this
-
-    initialRules.koRule = Rules::parseKoRule(koRule);
-    initialRules.scoringRule = Rules::parseScoringRule(scoringRule);
-    initialRules.multiStoneSuicideLegal = multiStoneSuicideLegal;
-    initialRules.komi = komi;
-  }
+  //Defaults to 7.5 komi, gtp will generally override this
+  Rules initialRules = Setup::loadSingleRulesExceptForKomi(cfg);
 
   SearchParams params = Setup::loadSingleParams(cfg);
   logger.write("Using " + Global::intToString(params.numThreads) + " CPU thread(s) for search");
+  //Set a default for conservativePass that differs from matches or selfplay
+  if(!cfg.contains("conservativePass") && !cfg.contains("conservativePass0"))
+    params.conservativePass = true;
+  if(!cfg.contains("fillDameBeforePass") && !cfg.contains("fillDameBeforePass0"))
+    params.fillDameBeforePass = true;
 
   const bool ponderingEnabled = cfg.getBool("ponderingEnabled");
-  const bool cleanupBeforePass = cfg.contains("cleanupBeforePass") ? cfg.getBool("cleanupBeforePass") : false;
+  const bool cleanupBeforePass = cfg.contains("cleanupBeforePass") ? cfg.getBool("cleanupBeforePass") : true;
   const bool allowResignation = cfg.contains("allowResignation") ? cfg.getBool("allowResignation") : false;
   const double resignThreshold = cfg.contains("allowResignation") ? cfg.getDouble("resignThreshold",-1.0,0.0) : -1.0; //Threshold on [-1,1], regardless of winLossUtilityFactor
   const int resignConsecTurns = cfg.contains("resignConsecTurns") ? cfg.getInt("resignConsecTurns",1,100) : 3;
-  const int whiteBonusPerHandicapStone = cfg.contains("whiteBonusPerHandicapStone") ? cfg.getInt("whiteBonusPerHandicapStone",0,1) : 0;
 
   Setup::initializeSession(cfg);
 
@@ -749,12 +985,19 @@ int MainCmds::gtp(int argc, const char* const* argv) {
   const int analysisPVLen = cfg.contains("analysisPVLen") ? cfg.getInt("analysisPVLen",1,100) : 9;
   const bool assumeMultipleStartingBlackMovesAreHandicap =
     cfg.contains("assumeMultipleStartingBlackMovesAreHandicap") ? cfg.getBool("assumeMultipleStartingBlackMovesAreHandicap") : true;
+  const bool preventEncore = cfg.contains("preventCleanupPhase") ? cfg.getBool("preventCleanupPhase") : true;
+  const double dynamicPlayoutDoublingAdvantageCapPerOppLead =
+    cfg.contains("dynamicPlayoutDoublingAdvantageCapPerOppLead") ? cfg.getDouble("dynamicPlayoutDoublingAdvantageCapPerOppLead",0.0,0.5) : 0.0;
+  if(cfg.contains("dynamicPlayoutDoublingAdvantageCapPerOppLead") && (cfg.contains("playoutDoublingAdvantage") || cfg.contains("playoutDoublingAdvantage0")))
+    throw StringError("Cannot specify both dynamicPlayoutDoublingAdvantageCapPerOppLead and playoutDoublingAdvantage");
+  if(cfg.contains("dynamicPlayoutDoublingAdvantageCapPerOppLead") && params.playoutDoublingAdvantagePla == C_EMPTY)
+    throw StringError("When specifying dynamicPlayoutDoublingAdvantageCapPerOppLead, must specify a player for playoutDoublingAdvantagePla");
 
   Player perspective = Setup::parseReportAnalysisWinrates(cfg,C_EMPTY);
 
   GTPEngine* engine = new GTPEngine(
     nnModelFile,params,initialRules,
-    whiteBonusPerHandicapStone,assumeMultipleStartingBlackMovesAreHandicap,
+    assumeMultipleStartingBlackMovesAreHandicap,preventEncore,dynamicPlayoutDoublingAdvantageCapPerOppLead,
     perspective,analysisPVLen
   );
   engine->setOrResetBoardSize(cfg,logger,seedRand,-1,-1);
@@ -847,6 +1090,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     }
 
     bool responseIsError = false;
+    bool suppressResponse = false;
     bool shouldQuitAfterResponse = false;
     bool maybeStartPondering = false;
     string response;
@@ -943,7 +1187,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         response = "Expected single float argument for komi but got '" + Global::concat(pieces," ") + "'";
       }
       //GTP spec says that we should accept any komi, but we're going to ignore that.
-      else if(isnan(newKomi) || newKomi < -100.0 || newKomi > 100.0) {
+      else if(isnan(newKomi) || newKomi < Rules::MIN_USER_KOMI || newKomi > Rules::MAX_USER_KOMI) {
         responseIsError = true;
         response = "unacceptable komi";
       }
@@ -958,21 +1202,61 @@ int MainCmds::gtp(int argc, const char* const* argv) {
       }
     }
 
-    else if(command == "set_rules") {
-      Rules newRules;
-      if(pieces.size() != 1) {
-        response = "Expected single argument for rules but got '" + Global::concat(pieces," ") + "'";
-      }
-      else if(!Rules::tryParseRules(pieces[0],newRules)) {
-        responseIsError = true;
-        response = "Unknown rules '" + Global::concat(pieces," ") + "'";
+    else if(command == "kata-get-rules") {
+      if(pieces.size() != 0) {
+        response = "Expected no arguments for kata-get-rules but got '" + Global::concat(pieces," ") + "'";
       }
       else {
+        response = engine->getCurrentRules().toJsonStringNoKomi();
+      }
+    }
+
+    else if(command == "kata-set-rules") {
+      string rest = Global::concat(pieces," ");
+      bool parseSuccess = false;
+      Rules newRules;
+      try {
+        newRules = Rules::parseRulesWithoutKomi(rest,engine->getCurrentRules().komi);
+        parseSuccess = true;
+      }
+      catch(const StringError& err) {
+        responseIsError = true;
+        response = "Unknown rules '" + rest + "', " + err.what();
+      }
+      if(parseSuccess) {
         string error;
         bool suc = engine->setRulesNotIncludingKomi(newRules,error);
         if(!suc) {
           responseIsError = true;
           response = error;
+        }
+      }
+    }
+
+    else if(command == "kata-set-rule") {
+      if(pieces.size() != 2) {
+        responseIsError = true;
+        response = "Expected two arguments for kata-set-rule but got '" + Global::concat(pieces," ") + "'";
+      }
+      else {
+        bool parseSuccess = false;
+        Rules currentRules = engine->getCurrentRules();
+        Rules newRules;
+        try {
+          newRules = Rules::updateRules(pieces[0], pieces[1], currentRules);
+          parseSuccess = true;
+        }
+        catch(const StringError& err) {
+          responseIsError = true;
+          response = err.what();
+        }
+        if(parseSuccess) {
+          string error;
+          bool suc = engine->setRulesNotIncludingKomi(newRules,error);
+          if(!suc) {
+            responseIsError = true;
+            response = error;
+          }
         }
       }
     }
@@ -1139,8 +1423,49 @@ int MainCmds::gtp(int argc, const char* const* argv) {
           cleanupBeforePass,ogsChatToStderr,
           allowResignation,resignThreshold,resignConsecTurns,
           logSearchInfo,debug,playChosenMove,
-          response,responseIsError,maybeStartPondering
+          response,responseIsError,maybeStartPondering,
+          GTPEngine::AnalyzeArgs()
         );
+      }
+    }
+
+    else if(command == "genmove_analyze" || command == "lz-genmove_analyze" || command == "kata-genmove_analyze") {
+      Player pla = engine->bot->getRootPla();
+      bool parseFailed = false;
+      GTPEngine::AnalyzeArgs args = parseAnalyzeCommand(command, pieces, pla, parseFailed);
+      if(parseFailed) {
+        responseIsError = true;
+        response = "Could not parse genmove_analyze arguments or arguments out of range: '" + Global::concat(pieces," ") + "'";
+      }
+      else {
+        bool debug = false;
+        bool playChosenMove = true;
+
+        //Make sure the "equals" for GTP is printed out prior to the first analyze line, regardless of thread racing
+        if(hasId)
+          cout << "=" << Global::intToString(id) << endl;
+        else
+          cout << "=" << endl;
+        engine->genMove(
+          pla,
+          logger,searchFactorWhenWinningThreshold,searchFactorWhenWinning,
+          cleanupBeforePass,ogsChatToStderr,
+          allowResignation,resignThreshold,resignConsecTurns,
+          logSearchInfo,debug,playChosenMove,
+          response,responseIsError,maybeStartPondering,
+          args
+        );
+        //And manually handle the result as well. In case of error, don't report any play.
+        suppressResponse = true;
+        if(!responseIsError) {
+          cout << response << endl;
+          cout << endl;
+        }
+        else {
+          cout << endl;
+          if(!loggingToStderr)
+            cerr << response << endl;
+        }
       }
     }
 
@@ -1149,8 +1474,16 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     }
     else if(command == "showboard") {
       ostringstream sout;
-      Board::printBoard(sout, engine->bot->getRootBoard(), Board::NULL_LOC, &(engine->bot->getRootHist().moveHistory));
-      response = Global::trim(sout.str());
+      engine->bot->getRootHist().printBasicInfo(sout, engine->bot->getRootBoard());
+      //Filter out all double newlines, since double newline terminates GTP command responses
+      string s = sout.str();
+      string filtered;
+      for(int i = 0; i<s.length(); i++) {
+        if(i > 0 && s[i-1] == '\n' && s[i] == '\n')
+          continue;
+        filtered += s[i];
+      }
+      response = Global::trim(filtered);
     }
 
     else if(command == "place_free_handicap") {
@@ -1172,7 +1505,7 @@ int MainCmds::gtp(int argc, const char* const* argv) {
         response = "Board is not empty";
       }
       else {
-        engine->placeFreeHandicap(n,logger,response,responseIsError);
+        engine->placeFreeHandicap(n,response,responseIsError);
       }
     }
 
@@ -1199,9 +1532,9 @@ int MainCmds::gtp(int argc, const char* const* argv) {
           board.setStone(locs[i],P_BLACK);
 
         Player pla = P_WHITE;
-        BoardHistory hist(board,pla,engine->bot->getRootHist().rules,0);
+        BoardHistory hist(board,pla,engine->getCurrentRules(),0);
         vector<Move> newMoveHistory;
-        engine->setPositionAndRulesExceptKomi(pla,board,hist,board,pla,newMoveHistory);
+        engine->setPositionAndRules(pla,board,hist,board,pla,newMoveHistory);
       }
     }
 
@@ -1314,10 +1647,10 @@ int MainCmds::gtp(int argc, const char* const* argv) {
           Board sgfInitialBoard;
           Player sgfInitialNextPla;
           BoardHistory sgfInitialHist;
+          Rules sgfRules;
           Board sgfBoard;
           Player sgfNextPla;
           BoardHistory sgfHist;
-          float sgfKomi;
 
           bool sgfParseSuccess = false;
           CompactSgf* sgf = NULL;
@@ -1327,9 +1660,8 @@ int MainCmds::gtp(int argc, const char* const* argv) {
             if(!moveNumberSpecified || moveNumber > sgf->moves.size())
               moveNumber = sgf->moves.size();
 
-            Rules baseRules = engine->getBaseRules();
-            Rules sgfRules = sgf->getRulesOrWarn(
-              baseRules,
+            sgfRules = sgf->getRulesOrWarn(
+              engine->getCurrentRules(), //Use current rules as default
               [&logger](const string& msg) { logger.write(msg); cerr << msg << endl; }
             );
             if(engine->nnEval != NULL) {
@@ -1337,7 +1669,8 @@ int MainCmds::gtp(int argc, const char* const* argv) {
               Rules supportedRules = engine->nnEval->getSupportedRules(sgfRules,rulesWereSupported);
               if(!rulesWereSupported) {
                 ostringstream out;
-                out << "WARNING: Rules " << sgfRules << " from sgf not supported by neural net, using " << supportedRules << " instead";
+                out << "WARNING: Rules " << sgfRules.toJsonStringNoKomi()
+                    << " from sgf not supported by neural net, using " << supportedRules.toJsonStringNoKomi() << " instead";
                 logger.write(out.str());
                 if(!loggingToStderr)
                   cerr << out.str() << endl;
@@ -1345,142 +1678,76 @@ int MainCmds::gtp(int argc, const char* const* argv) {
               }
             }
 
-            sgfKomi = sgfRules.komi;
-            //Go ahead and copy over sgf komi so that we only warn about other rules differences
-            baseRules.komi = sgfRules.komi;
-            if(sgfRules != baseRules) {
-              ostringstream out;
-              out << "Changing rules to " << sgfRules;
-              logger.write(out.str());
-              if(!loggingToStderr)
-                cerr << out.str() << endl;
+            {
+              //See if the rules differ, IGNORING komi differences
+              Rules currentRules = engine->getCurrentRules();
+              currentRules.komi = sgfRules.komi;
+              if(sgfRules != currentRules) {
+                ostringstream out;
+                out << "Changing rules to " << sgfRules.toJsonStringNoKomi();
+                logger.write(out.str());
+                if(!loggingToStderr)
+                  cerr << out.str() << endl;
+              }
             }
 
             sgf->setupInitialBoardAndHist(sgfRules, sgfInitialBoard, sgfInitialNextPla, sgfInitialHist);
             sgfBoard = sgfInitialBoard;
             sgfNextPla = sgfInitialNextPla;
             sgfHist = sgfInitialHist;
-            for(size_t i = 0; i<moveNumber; i++) {
-              Loc moveLoc = sgf->moves[i].loc;
-              Player movePla = sgf->moves[i].pla;
-              bool multiStoneSuicideLegal = true; //Tolerate suicide regardless of our own rules
-              if(!sgfBoard.isLegal(moveLoc,movePla,multiStoneSuicideLegal)) {
-                throw StringError("Illegal move");
-              }
-              sgfHist.makeBoardMoveAssumeLegal(sgfBoard,moveLoc,movePla,NULL);
-              sgfNextPla = getOpp(movePla);
-            }
+            sgf->playMovesTolerant(sgfBoard,sgfNextPla,sgfHist,moveNumber,preventEncore);
 
             delete sgf;
             sgf = NULL;
             sgfParseSuccess = true;
           }
+          catch(const StringError& err) {
+            delete sgf;
+            sgf = NULL;
+            responseIsError = true;
+            response = "Could not load sgf: " + string(err.what());
+          }
           catch(...) {
             delete sgf;
             sgf = NULL;
+            responseIsError = true;
+            response = "Cannot load file";
           }
 
           if(sgfParseSuccess) {
-            if(sgfKomi != engine->getBaseRules().komi) {
+            if(sgfRules.komi != engine->getCurrentRules().komi) {
               ostringstream out;
-              out << "Changing komi to " << sgfKomi;
+              out << "Changing komi to " << sgfRules.komi;
               logger.write(out.str());
               if(!loggingToStderr)
                 cerr << out.str() << endl;
             }
-            engine->updateKomiIfNew(sgfKomi);
-            engine->setPositionAndRulesExceptKomi(sgfNextPla, sgfBoard, sgfHist, sgfInitialBoard, sgfInitialNextPla, sgfHist.moveHistory);
-          }
-          else {
-            responseIsError = true;
-            response = "cannot load file";
+            engine->setPositionAndRules(sgfNextPla, sgfBoard, sgfHist, sgfInitialBoard, sgfInitialNextPla, sgfHist.moveHistory);
           }
         }
       }
     }
 
-    else if(command == "lz-analyze" || command == "kata-analyze") {
-      int numArgsParsed = 0;
-
+    else if(command == "analyze" || command == "lz-analyze" || command == "kata-analyze") {
       Player pla = engine->bot->getRootPla();
-      double lzAnalyzeInterval = 1e30;
-      int minMoves = 0;
-      bool showOwnership = false;
       bool parseFailed = false;
-
-      //Format:
-      //lz-analyze [optional player] [optional interval float] <keys and values>
-      //Keys and values consists of zero or more of:
-
-      //interval <float interval in centiseconds>
-      //avoid <player> <comma-separated moves> <until movenum>
-      //minmoves <int min number of moves to show>
-      //ownership <bool whether to show ownership or not>
-
-      //Parse optional player
-      if(pieces.size() > numArgsParsed && PlayerIO::tryParsePlayer(pieces[numArgsParsed],pla))
-        numArgsParsed += 1;
-
-      //Parse optional interval float
-      if(pieces.size() > numArgsParsed &&
-         Global::tryStringToDouble(pieces[numArgsParsed],lzAnalyzeInterval) &&
-         !isnan(lzAnalyzeInterval) && lzAnalyzeInterval >= 0 && lzAnalyzeInterval < 1e20)
-        numArgsParsed += 1;
-
-      //Now loop and handle all key value pairs
-      while(pieces.size() > numArgsParsed) {
-        const string& key = pieces[numArgsParsed];
-        numArgsParsed += 1;
-        //Make sure we have a value. If not, then we fail.
-        if(pieces.size() <= numArgsParsed) {
-          parseFailed = true;
-          break;
-        }
-
-        const string& value = pieces[numArgsParsed];
-        numArgsParsed += 1;
-
-        if(key == "interval" && Global::tryStringToDouble(value,lzAnalyzeInterval) &&
-           !isnan(lzAnalyzeInterval) && lzAnalyzeInterval >= 0 && lzAnalyzeInterval < 1e20) {
-          continue;
-        }
-        //Parse it but ignore it since we don't support excluding moves right now
-        else if(key == "avoid" || key == "allow") {
-          //Parse two more arguments, and ignore them
-          if(pieces.size() <= numArgsParsed+1) {
-            parseFailed = true;
-            break;
-          }
-          const string& moves = pieces[numArgsParsed];
-          (void)moves;
-          numArgsParsed += 1;
-          const string& untilMove = pieces[numArgsParsed];
-          (void)untilMove;
-          numArgsParsed += 1;
-          continue;
-        }
-        else if(key == "minmoves" && Global::tryStringToInt(value,minMoves) &&
-                minMoves >= 0 && minMoves < 1000000000) {
-          continue;
-        }
-
-        else if(command == "kata-analyze" && key == "ownership" && Global::tryStringToBool(value,showOwnership)) {
-          continue;
-        }
-
-        parseFailed = true;
-        break;
-      }
+      GTPEngine::AnalyzeArgs args = parseAnalyzeCommand(command, pieces, pla, parseFailed);
 
       if(parseFailed) {
         responseIsError = true;
         response = "Could not parse analyze arguments or arguments out of range: '" + Global::concat(pieces," ") + "'";
       }
       else {
-        double secondsPerReport = lzAnalyzeInterval * 0.01; //Convert from centiseconds to seconds
+        //Make sure the "equals" for GTP is printed out prior to the first analyze line, regardless of thread racing
+        if(hasId)
+          cout << "=" << Global::intToString(id) << endl;
+        else
+          cout << "=" << endl;
 
-        bool kata = command == "kata-analyze";
-        engine->analyze(pla, kata, secondsPerReport, minMoves, showOwnership);
+        engine->analyze(pla, args);
+
+        //No response - currentlyAnalyzing will make sure we get a newline at the appropriate time, when stopped.
+        suppressResponse = true;
         currentlyAnalyzing = true;
       }
     }
@@ -1507,11 +1774,10 @@ int MainCmds::gtp(int argc, const char* const* argv) {
     else
       response = "=" + response;
 
-    cout << response << endl;
-
-    //GTP needs extra newline, except if currently analyzing, defer the newline until we actually stop analysis
-    if(!currentlyAnalyzing)
+    if(!suppressResponse) {
+      cout << response << endl;
       cout << endl;
+    }
 
     if(logAllGTPCommunication)
       logger.write(response);

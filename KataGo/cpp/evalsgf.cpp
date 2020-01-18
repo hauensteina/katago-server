@@ -4,6 +4,7 @@
 #include "dataio/sgf.h"
 #include "search/asyncbot.h"
 #include "program/setup.h"
+#include "program/play.h"
 #include "main.h"
 
 #define TCLAP_NAMESTARTSTRING "-" //Use single dashes for all flags
@@ -22,7 +23,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
   int moveNum;
   string printBranch;
   string extraMoves;
-  int maxVisits;
+  int64_t maxVisits;
   int numThreads;
   float overrideKomi;
   bool printOwnership;
@@ -30,6 +31,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
   bool printPolicy;
   bool printScoreNow;
   bool printRootEndingBonus;
+  bool printLead;
   bool rawNN;
   try {
     TCLAP::CmdLine cmd("Run a search on a position from an sgf file", ' ', Version::getKataGoVersionForHelp(),true);
@@ -41,7 +43,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     TCLAP::ValueArg<string> printArg("p","print","Alias for -print-branch",false,string(),"MOVE MOVE ...");
     TCLAP::ValueArg<string> extraMovesArg("","extra-moves","Extra moves to force-play before doing search",false,string(),"MOVE MOVE ...");
     TCLAP::ValueArg<string> extraArg("e","extra","Alias for -extra-moves",false,string(),"MOVE MOVE ...");
-    TCLAP::ValueArg<int> visitsArg("v","visits","Set the number of visits",false,-1,"VISITS");
+    TCLAP::ValueArg<long> visitsArg("v","visits","Set the number of visits",false,-1,"VISITS");
     TCLAP::ValueArg<int> threadsArg("t","threads","Set the number of threads",false,-1,"THREADS");
     TCLAP::ValueArg<float> overrideKomiArg("","override-komi","Artificially set komi",false,std::numeric_limits<float>::quiet_NaN(),"KOMI");
     TCLAP::SwitchArg printOwnershipArg("","print-ownership","Print ownership");
@@ -49,6 +51,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     TCLAP::SwitchArg printPolicyArg("","print-policy","Print policy");
     TCLAP::SwitchArg printScoreNowArg("","print-score-now","Print score now");
     TCLAP::SwitchArg printRootEndingBonusArg("","print-root-ending-bonus","Print root ending bonus now");
+    TCLAP::SwitchArg printLeadArg("","print-lead","Compute and print lead");
     TCLAP::SwitchArg rawNNArg("","raw-nn","Perform single raw neural net eval");
     cmd.add(configFileArg);
     cmd.add(modelFileArg);
@@ -66,6 +69,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     cmd.add(printPolicyArg);
     cmd.add(printScoreNowArg);
     cmd.add(printRootEndingBonusArg);
+    cmd.add(printLeadArg);
     cmd.add(rawNNArg);
     cmd.parse(argc,argv);
     configFile = configFileArg.getValue();
@@ -76,7 +80,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     string print = printArg.getValue();
     extraMoves = extraMovesArg.getValue();
     string extra = extraArg.getValue();
-    maxVisits = visitsArg.getValue();
+    maxVisits = (int64_t)visitsArg.getValue();
     numThreads = threadsArg.getValue();
     overrideKomi = overrideKomiArg.getValue();
     printOwnership = printOwnershipArg.getValue();
@@ -84,6 +88,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     printPolicy = printPolicyArg.getValue();
     printScoreNow = printScoreNowArg.getValue();
     printRootEndingBonus = printRootEndingBonusArg.getValue();
+    printLead = printLeadArg.getValue();
     rawNN = rawNNArg.getValue();
 
     if(printBranch.length() > 0 && print.length() > 0) {
@@ -135,17 +140,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     if(moveNum > moves.size())
       throw StringError("Move num " + Global::intToString(moveNum) + " requested but sgf has only " + Global::intToString(moves.size()));
 
-    for(int i = 0; i<moveNum; i++) {
-      //Tolerate suicide moves in an sgf, regardless of what the nominal rules were
-      bool multiStoneSuicideLegal = true;
-      if(!board.isLegal(moves[i].loc,moves[i].pla,multiStoneSuicideLegal)) {
-        cerr << board << endl;
-        cerr << "SGF Illegal move " << (i+1) << " for " << PlayerIO::colorToChar(moves[i].pla) << ": " << Location::toString(moves[i].loc,board) << endl;
-        throw StringError("Illegal move in SGF");
-      }
-      hist.makeBoardMoveAssumeLegal(board,moves[i].loc,moves[i].pla,NULL);
-      nextPla = getOpp(moves[i].pla);
-    }
+    sgf->playMovesTolerant(board,nextPla,hist,moveNum,false);
 
     vector<Loc> extraMoveLocs = Location::parseSequence(extraMoves,board);
     for(size_t i = 0; i<extraMoveLocs.size(); i++) {
@@ -230,7 +225,9 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     NNResultBuf buf;
     bool skipCache = true;
     bool includeOwnerMap = true;
-    nnEval->evaluate(board,hist,nextPla,params.drawEquivalentWinsForWhite,buf,NULL,skipCache,includeOwnerMap);
+    MiscNNInputParams nnInputParams;
+    nnInputParams.drawEquivalentWinsForWhite = params.drawEquivalentWinsForWhite;
+    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
 
     cout << "Rules: " << hist.rules << endl;
     cout << "Encore phase " << hist.encorePhase << endl;
@@ -354,6 +351,15 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
   sout << "Tree:\n";
   search->printTree(sout, search->rootNode, options, perspective);
   logger.write(sout.str());
+
+  if(printLead) {
+    BoardHistory hist2(hist);
+    double lead = Play::computeLead(
+      bot->getSearch(), bot->getSearch(), board, hist2, nextPla,
+      20, logger, OtherGameProperties()
+    );
+    cout << "LEAD: " << lead << endl;
+  }
 
   delete bot;
   delete nnEval;

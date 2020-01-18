@@ -72,7 +72,7 @@ struct Sgf {
     int initialTurnNumber;
   };
 
-  //Loads SGF all unique positions in ALL branches of that SGF, sampling them with the specified probability.
+  //Loads SGF all unique positions in ALL branches of that SGF.
   //Hashes are used to filter out "identical" positions when loading many files from different SGFs that may have overlapping openings, etc.
   //The hashes are not guaranteed to correspond to position hashes, or anything else external to this function itself.
   //May raise an exception on illegal moves or other SGF issues, only partially appending things on to the boards and hists.
@@ -130,7 +130,11 @@ struct CompactSgf {
   Rules getRulesOrWarn(const Rules& defaultRules, std::function<void(const std::string& msg)> f) const;
 
   void setupInitialBoardAndHist(const Rules& initialRules, Board& board, Player& nextPla, BoardHistory& hist) const;
-  void setupBoardAndHist(const Rules& initialRules, Board& board, Player& nextPla, BoardHistory& hist, int turnNumber) const;
+  void playMovesAssumeLegal(Board& board, Player& nextPla, BoardHistory& hist, int turnNumber) const;
+  void setupBoardAndHistAssumeLegal(const Rules& initialRules, Board& board, Player& nextPla, BoardHistory& hist, int turnNumber) const;
+  //These throw a StringError upon illegal move.
+  void playMovesTolerant(Board& board, Player& nextPla, BoardHistory& hist, int turnNumber, bool preventEncore) const;
+  void setupBoardAndHistTolerant(const Rules& initialRules, Board& board, Player& nextPla, BoardHistory& hist, int turnNumber, bool preventEncore) const;
 };
 
 namespace WriteSgf {
@@ -139,8 +143,8 @@ namespace WriteSgf {
   //indicate the index of the first turn that should be used for training data. (0 means the whole SGF, 1 means skipping black's first move, etc).
   //If valueTargets is not NULL, also write down after each move the MCTS values following that search move.
   void writeSgf(
-    std::ostream& out, const std::string& bName, const std::string& wName, const Rules& rules,
-    const BoardHistory& hist,
+    std::ostream& out, const std::string& bName, const std::string& wName,
+    const BoardHistory& endHist,
     const FinishedGameData* gameData
   );
 

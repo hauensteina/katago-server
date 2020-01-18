@@ -177,6 +177,33 @@ benchmark.cpp.s:
 	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/benchmark.cpp.s
 .PHONY : benchmark.cpp.s
 
+core/bsearch.o: core/bsearch.cpp.o
+
+.PHONY : core/bsearch.o
+
+# target to build an object file
+core/bsearch.cpp.o:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/core/bsearch.cpp.o
+.PHONY : core/bsearch.cpp.o
+
+core/bsearch.i: core/bsearch.cpp.i
+
+.PHONY : core/bsearch.i
+
+# target to preprocess a source file
+core/bsearch.cpp.i:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/core/bsearch.cpp.i
+.PHONY : core/bsearch.cpp.i
+
+core/bsearch.s: core/bsearch.cpp.s
+
+.PHONY : core/bsearch.s
+
+# target to generate assembly for a file
+core/bsearch.cpp.s:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/core/bsearch.cpp.s
+.PHONY : core/bsearch.cpp.s
+
 core/config_parser.o: core/config_parser.cpp.o
 
 .PHONY : core/config_parser.o
@@ -1500,6 +1527,33 @@ search/searchparams.cpp.s:
 	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/search/searchparams.cpp.s
 .PHONY : search/searchparams.cpp.s
 
+search/searchresults.o: search/searchresults.cpp.o
+
+.PHONY : search/searchresults.o
+
+# target to build an object file
+search/searchresults.cpp.o:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/search/searchresults.cpp.o
+.PHONY : search/searchresults.cpp.o
+
+search/searchresults.i: search/searchresults.cpp.i
+
+.PHONY : search/searchresults.i
+
+# target to preprocess a source file
+search/searchresults.cpp.i:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/search/searchresults.cpp.i
+.PHONY : search/searchresults.cpp.i
+
+search/searchresults.s: search/searchresults.cpp.s
+
+.PHONY : search/searchresults.s
+
+# target to generate assembly for a file
+search/searchresults.cpp.s:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/search/searchresults.cpp.s
+.PHONY : search/searchresults.cpp.s
+
 search/timecontrols.o: search/timecontrols.cpp.o
 
 .PHONY : search/timecontrols.o
@@ -1866,6 +1920,9 @@ help:
 	@echo "... benchmark.o"
 	@echo "... benchmark.i"
 	@echo "... benchmark.s"
+	@echo "... core/bsearch.o"
+	@echo "... core/bsearch.i"
+	@echo "... core/bsearch.s"
 	@echo "... core/config_parser.o"
 	@echo "... core/config_parser.i"
 	@echo "... core/config_parser.s"
@@ -2013,6 +2070,9 @@ help:
 	@echo "... search/searchparams.o"
 	@echo "... search/searchparams.i"
 	@echo "... search/searchparams.s"
+	@echo "... search/searchresults.o"
+	@echo "... search/searchresults.i"
+	@echo "... search/searchresults.s"
 	@echo "... search/timecontrols.o"
 	@echo "... search/timecontrols.i"
 	@echo "... search/timecontrols.s"

@@ -54,7 +54,7 @@ with open(model_config_json) as f:
 
 pos_len = 19 # shouldn't matter, all we're doing is exporting weights that don't depend on this
 if name_scope is not None:
-  with tf.name_scope(name_scope):
+  with tf.compat.v1.variable_scope(name_scope):
     model = Model(model_config,pos_len,{})
 else:
   model = Model(model_config,pos_len,{})
@@ -64,17 +64,17 @@ ModelUtils.print_trainable_variables(log)
 
 print("Testing", flush=True)
 
-saver = tf.train.Saver(
+saver = tf.compat.v1.train.Saver(
   max_to_keep = 10000,
   save_relative_paths = True,
 )
 
 #Some tensorflow options
-#tfconfig = tf.ConfigProto(log_device_placement=False,device_count={'GPU': 0})
-tfconfig = tf.ConfigProto(log_device_placement=False)
+#tfconfig = tf.compat.v1.ConfigProto(log_device_placement=False,device_count={'GPU': 0})
+tfconfig = tf.compat.v1.ConfigProto(log_device_placement=False)
 #tfconfig.gpu_options.allow_growth = True
 #tfconfig.gpu_options.per_process_gpu_memory_fraction = 0.4
-with tf.Session(config=tfconfig) as session:
+with tf.compat.v1.Session(config=tfconfig) as session:
   saver.restore(session, model_variables_prefix)
 
   sys.stdout.flush()
@@ -112,7 +112,7 @@ with tf.Session(config=tfconfig) as session:
     writeln(model.get_num_bin_input_features(model_config))
     writeln(model.get_num_global_input_features(model_config))
 
-    variables = dict((variable.name,variable) for variable in tf.global_variables())
+    variables = dict((variable.name,variable) for variable in tf.compat.v1.global_variables())
     def get_weights(name):
       if name_scope is not None:
         return np.array(variables[name_scope+"/"+name+":0"].eval())
@@ -157,7 +157,7 @@ with tf.Session(config=tfconfig) as session:
 
     def write_bn(name,num_channels):
       writeln(name)
-      (nc,epsilon,has_bias,has_scale) = model.batch_norms[name]
+      (nc,epsilon,has_bias,has_scale,use_fixup) = model.batch_norms[name]
       assert(nc == num_channels)
 
       writeln(num_channels)
@@ -165,11 +165,17 @@ with tf.Session(config=tfconfig) as session:
       writeln(1 if has_scale else 0)
       writeln(1 if has_bias else 0)
 
-      weights = get_weights(name+"/moving_mean")
+      if use_fixup:
+        weights = np.zeros([num_channels])
+      else:
+        weights = get_weights(name+"/moving_mean")
       assert(len(weights.shape) == 1 and weights.shape[0] == num_channels)
       write_weights(weights)
 
-      weights = get_weights(name+"/moving_variance")
+      if use_fixup:
+        weights = np.ones([num_channels])
+      else:
+        weights = get_weights(name+"/moving_variance")
       assert(len(weights.shape) == 1 and weights.shape[0] == num_channels)
       write_weights(weights)
 
@@ -311,9 +317,17 @@ with tf.Session(config=tfconfig) as session:
         w[2] = w[2] - 5000.0
         write_matbias("v3/b",model.v3_size,w)
 
-      #For now, only output the scoremean and scorestdev channels
-      write_matmul("sv3/w",model.v2_size,2,get_weights("mv3/w")[:,0:2])
-      write_matbias("sv3/b",2,get_weights("mv3/b")[0:2])
+      #For now, only output the scoremean and scorestdev and lead and vtime channels
+      if model.use_scoremean_as_lead:
+        w = get_weights("mv3/w")[:,0:4]
+        b = get_weights("mv3/b")[0:4]
+        w[:,2] = w[:,0]
+        b[2] = b[0]
+        write_matmul("sv3/w",model.v2_size,4,w)
+        write_matbias("sv3/b",4,b)
+      else:
+        write_matmul("sv3/w",model.v2_size,4,get_weights("mv3/w")[:,0:4])
+        write_matbias("sv3/b",4,get_weights("mv3/b")[0:4])
 
       write_model_conv(model.vownership_conv)
 
@@ -331,5 +345,3 @@ with tf.Session(config=tfconfig) as session:
 
   sys.stdout.flush()
   sys.stderr.flush()
-
-

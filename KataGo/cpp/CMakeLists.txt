@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12.3)
+cmake_minimum_required(VERSION 3.10.2)
 project(writedata)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -26,7 +26,7 @@ endif()
 set(BUILD_MCTS 1 CACHE BOOL "Build 'katago' for GTP engine and other tools (you probably want this)")
 set(USE_BACKEND CACHE STRING "Neural net backend")
 string(TOUPPER "${USE_BACKEND}" USE_BACKEND)
-set_property(CACHE USE_BACKEND PROPERTY STRINGS "" CUDA OPENGL)
+set_property(CACHE USE_BACKEND PROPERTY STRINGS "" CUDA OPENCL)
 set(USE_TCMALLOC 0 CACHE BOOL "Use TCMalloc")
 set(NO_GIT_REVISION 0 CACHE BOOL "Disable embedding the git revision into the compiled exe")
 set(Boost_USE_STATIC_LIBS_ON 0 CACHE BOOL "Compile against boost statically instead of dynamically")
@@ -144,6 +144,7 @@ endif()
 
 if(BUILD_WRITE)
   add_executable(write
+    core/bsearch.cpp
     core/datetime.cpp
     core/global.cpp
     core/hash.cpp
@@ -185,6 +186,7 @@ endif()
 if(BUILD_MCTS)
   add_executable(katago
     core/global.cpp
+    core/bsearch.cpp
     core/config_parser.cpp
     core/datetime.cpp
     core/elo.cpp
@@ -218,6 +220,7 @@ if(BUILD_MCTS)
     search/searchparams.cpp
     search/mutexpool.cpp
     search/search.cpp
+    search/searchresults.cpp
     search/asyncbot.cpp
     search/distributiontable.cpp
     search/analysisdata.cpp

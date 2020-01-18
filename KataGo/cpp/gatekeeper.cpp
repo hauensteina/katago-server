@@ -121,7 +121,7 @@ namespace {
           logger.write("Game " + Global::intToString(numGamesTallied) + ": noresult");
         }
         else {
-          BoardHistory hist = data->endHist;
+          BoardHistory hist(data->endHist);
           Board endBoard = hist.getRecentBoard(0);
           //Force game end just in caseif we crossed a move limit
           if(!hist.isGameFinished)
@@ -152,13 +152,13 @@ namespace {
 
         if(sgfOut != NULL) {
           assert(data->startHist.moveHistory.size() <= data->endHist.moveHistory.size());
-          WriteSgf::writeSgf(*sgfOut,data->bName,data->wName,data->startHist.rules,data->endHist,NULL);
+          WriteSgf::writeSgf(*sgfOut,data->bName,data->wName,data->endHist,data);
           (*sgfOut) << endl;
         }
         delete data;
 
         //Terminate games if one side has won enough to guarantee the victory.
-        int numGamesRemaining = matchPairer->getNumGamesTotalToGenerate() - numGamesTallied;
+        int64_t numGamesRemaining = matchPairer->getNumGamesTotalToGenerate() - numGamesTallied;
         assert(numGamesRemaining >= 0);
         if(numGamesRemaining > 0) {
           if(numCandidateWinPoints >= (numBaselineWinPoints + numGamesRemaining)) {
@@ -272,8 +272,9 @@ int MainCmds::gatekeeper(int argc, const char* const* argv) {
   fancyModes.allowResignation = cfg.getBool("allowResignation");
   fancyModes.resignThreshold = cfg.getDouble("resignThreshold",-1.0,0.0); //Threshold on [-1,1], regardless of winLossUtilityFactor
   fancyModes.resignConsecTurns = cfg.getInt("resignConsecTurns",1,100);
+  fancyModes.compensateKomiVisits = cfg.contains("compensateKomiVisits") ? cfg.getInt("compensateKomiVisits",1,10000) : 100;
 
-  GameRunner* gameRunner = new GameRunner(cfg, searchRandSeedBase, fancyModes);
+  GameRunner* gameRunner = new GameRunner(cfg, searchRandSeedBase, fancyModes, logger);
 
   Setup::initializeSession(cfg);
 
@@ -397,7 +398,7 @@ int MainCmds::gatekeeper(int argc, const char* const* argv) {
       MatchPairer::BotSpec botSpecW;
       if(netAndStuff->matchPairer->getMatchup(gameIdx, botSpecB, botSpecW, logger)) {
         gameData = gameRunner->runGame(
-          gameIdx, botSpecB, botSpecW, NULL, NULL, logger,
+          gameIdx, botSpecB, botSpecW, NULL, logger,
           stopConditions, NULL
         );
       }
