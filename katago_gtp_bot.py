@@ -31,6 +31,7 @@ g_response = None
 g_handler_lock = Lock()
 g_response_event = Event()
 g_win_prob = -1
+g_score = 0
 
 MOVE_TIMEOUT = 20 # seconds
 #===========================
@@ -46,10 +47,6 @@ class KataGTPBot( Agent):
 
             #--------------------------------------
             def wait_for_line( stream, callback):
-                global g_response
-                global g_handler_lock
-                global g_response_event
-                global g_win_prob
                 while True:
                     line = stream.readline().decode()
                     if line:
@@ -91,6 +88,7 @@ class KataGTPBot( Agent):
         global g_response
         global g_response_event
         global g_win_prob
+        global g_score
         line = katago_response
         print( 'kata resp: %s' % line)
         if g_win_prob < 0 and 'CHAT:' in line: # Winrate
@@ -99,6 +97,9 @@ class KataGTPBot( Agent):
             rstr = rstr.split()[1] # '44.37%'
             rstr = rstr[:-1] # '44.37'
             g_win_prob = 0.01 * float(rstr)
+            rstr = re.findall( r'ScoreLead\s+[-0-9.]+\s+', line)[0] # 'ScoreLead -7.85 '
+            rstr = rstr.split()[1] # '-7.85'
+            g_score = float(rstr)
         elif  '@@' in line: # Our own logs from KataGo
             print( line)
         elif line.startswith('='): # GTP response
@@ -242,7 +243,8 @@ class KataGTPBot( Agent):
     #------------------------------
     def diagnostics( self):
         global g_win_prob
-        return { 'winprob': float(g_win_prob) }
+        global g_score
+        return { 'winprob': float(g_win_prob), 'score': float(g_score) }
 
     # Turn an idx 0..360 into a move
     #---------------------------------
