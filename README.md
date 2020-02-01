@@ -10,7 +10,7 @@ katago-gui (the GUI) is a git submodule of katago-server (this repo).
 
 WARNING: You need the katago weights. Get them with
 $ cd katago-server
-$ wget https://github.com/lightvector/KataGo/releases/download/v1.1/g104-b20c256-s447913472-d241840887.zip
+$ wget https://github.com/lightvector/KataGo/releases/download/v1.3.1/g170-b20c256x2-s1039565568-d285739972.txt.gz
 
 To start the back end katago for testing, say
 gunicorn katago_server:app --bind 0.0.0.0:2818 -w 1
