@@ -32,6 +32,7 @@ g_handler_lock = Lock()
 g_response_event = Event()
 g_win_prob = -1
 g_score = 0
+g_bot_move = ''
 
 MOVE_TIMEOUT = 20 # seconds
 #===========================
@@ -89,6 +90,8 @@ class KataGTPBot( Agent):
         global g_response_event
         global g_win_prob
         global g_score
+        global g_bot_move
+
         line = katago_response
         print( 'kata resp: %s' % line)
         if g_win_prob < 0 and 'CHAT:' in line: # Winrate
@@ -114,6 +117,9 @@ class KataGTPBot( Agent):
             rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 ' fuck, lower case s
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
+            rstr = re.findall( r'\s+move\s+[A-Z0-9]+\s+', line)[0] # ' move Q16 '
+            rstr = rstr.split()[1] # 'Q16'
+            g_bot_move = rstr
             g_response = line
             g_response_event.set()
 
@@ -226,7 +232,7 @@ class KataGTPBot( Agent):
             print( 'error: katago response timeout')
             self._error_handler()
             return None
-        print( 'score response: ' + str(g_response))
+        print( 'score response:/n' + str(g_response))
         if g_response:
             probs = g_response.split( 'ownership')[1]
             probs = probs.split()
@@ -247,7 +253,7 @@ class KataGTPBot( Agent):
     def diagnostics( self):
         global g_win_prob
         global g_score
-        return { 'winprob': float(g_win_prob), 'score': float(g_score) }
+        return { 'winprob': float(g_win_prob), 'score': float(g_score), 'bot_move': g_bot_move }
 
     # Turn an idx 0..360 into a move
     #---------------------------------
