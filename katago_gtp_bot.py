@@ -168,10 +168,9 @@ class KataGTPBot( Agent):
         g_win_prob = -1
         p = self.katago_proc
 
+        # Set komi
         komi = config.get( 'komi', 7.5)
         self.set_komi( komi)
-
-        #playouts = config.get( 'playouts', 0)
 
         # Reset the game
         self._katagoCmd( 'clear_board')
@@ -213,6 +212,10 @@ class KataGTPBot( Agent):
         res = None
         p = self.katago_proc
 
+        # Set komi
+        komi = config.get( 'komi', 7.5)
+        self.set_komi( komi)
+
         # Reset the game
         self._katagoCmd( 'clear_board')
 
@@ -232,7 +235,7 @@ class KataGTPBot( Agent):
             print( 'error: katago response timeout')
             self._error_handler()
             return None
-        print( 'score response:/n' + str(g_response))
+        print( 'score response:\n' + str(g_response))
         if g_response:
             probs = g_response.split( 'ownership')[1]
             probs = probs.split()
