@@ -190,7 +190,6 @@ struct Search {
   void setPosition(Player pla, const Board& board, const BoardHistory& history);
 
   void setPlayerAndClearHistory(Player pla);
-  void setRulesAndClearHistory(Rules rules, int encorePhase);
   void setKomiIfNew(float newKomi); //Does not clear history, does clear search unless komi is equal.
   void setRootPassLegal(bool b);
   void setAlwaysIncludeOwnerMap(bool b);
@@ -254,7 +253,7 @@ struct Search {
   //Manual playout-by-playout interface------------------------------------------------
 
   //Call once at the start of each search
-  void beginSearch(Logger& logger);
+  void beginSearch();
 
   //Within-search functions, threadsafe-------------------------------------------
   void runSinglePlayout(SearchThread& thread);
@@ -300,7 +299,7 @@ private:
 
   bool isAllowedRootMove(Loc moveLoc) const;
 
-  void computeRootValues(Logger& logger);
+  void computeRootValues();
 
   double getScoreUtility(double scoreMeanSum, double scoreMeanSqSum, double weightSum) const;
   double getScoreUtilityDiff(double scoreMeanSum, double scoreMeanSqSum, double weightSum, double delta) const;

@@ -5,6 +5,7 @@ namespace MainCmds {
   int benchmark(int argc, const char* const* argv);
   int evalsgf(int argc, const char* const* argv);
   int gatekeeper(int argc, const char* const* argv);
+  int genconfig(int argc, const char* const* argv, const char* firstCommand);
   int gtp(int argc, const char* const* argv);
   int tuner(int argc, const char* const* argv);
   int match(int argc, const char* const* argv);
@@ -17,9 +18,11 @@ namespace MainCmds {
   int runoutputtests(int argc, const char* const* argv);
   int runsearchtests(int argc, const char* const* argv);
   int runsearchtestsv3(int argc, const char* const* argv);
+  int runsearchtestsv8(int argc, const char* const* argv);
   int runselfplayinittests(int argc, const char* const* argv);
   int runsekitrainwritetests(int argc, const char* const* argv);
   int runnnonmanyposestest(int argc, const char* const* argv);
+  int runownershiptests(int argc, const char* const* argv);
 
   int lzcost(int argc, const char* const* argv);
   int demoplay(int argc, const char* const* argv);

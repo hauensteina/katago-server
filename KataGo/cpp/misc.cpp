@@ -5,6 +5,7 @@
 #include "dataio/sgf.h"
 #include "search/asyncbot.h"
 #include "program/setup.h"
+#include "program/playutils.h"
 #include "program/play.h"
 #include "main.h"
 
@@ -14,7 +15,7 @@
 using namespace std;
 
 static void writeLine(
-  Search* search, const BoardHistory& baseHist,
+  const Search* search, const BoardHistory& baseHist,
   const vector<double>& winLossHistory, const vector<double>& scoreHistory, const vector<double>& scoreStdevHistory
 ) {
   const Board board = search->getRootBoard();
@@ -306,17 +307,17 @@ static void initializeDemoGame(Board& board, BoardHistory& hist, Player& pla, Ra
 
         if(nextMove.loc == Board::NULL_LOC) {
           wasSpecified = false;
-          Search* search = bot->getSearch();
+          Search* search = bot->getSearchStopAndWait();
           NNResultBuf buf;
           MiscNNInputParams nnInputParams;
           nnInputParams.drawEquivalentWinsForWhite = search->searchParams.drawEquivalentWinsForWhite;
-          search->nnEvaluator->evaluate(board,hist,pla,nnInputParams,buf,NULL,false,false);
+          search->nnEvaluator->evaluate(board,hist,pla,nnInputParams,buf,false,false);
           std::shared_ptr<NNOutput> nnOutput = std::move(buf.result);
 
           double temperature = 0.8;
           bool allowPass = false;
           Loc banMove = Board::NULL_LOC;
-          Loc loc = Play::chooseRandomPolicyMove(nnOutput.get(), board, hist, pla, rand, temperature, allowPass, banMove);
+          Loc loc = PlayUtils::chooseRandomPolicyMove(nnOutput.get(), board, hist, pla, rand, temperature, allowPass, banMove);
           nextMove.loc = loc;
         }
 
@@ -344,7 +345,7 @@ static void initializeDemoGame(Board& board, BoardHistory& hist, Player& pla, Ra
       } //Close while(true)
 
       int numVisits = 20;
-      Play::adjustKomiToEven(bot->getSearch(),bot->getSearch(),board,hist,pla,numVisits,logger,OtherGameProperties(),rand);
+      PlayUtils::adjustKomiToEven(bot->getSearchStopAndWait(),NULL,board,hist,pla,numVisits,logger,OtherGameProperties(),rand);
       double komi = hist.rules.komi + 0.3 * rand.nextGaussian();
       komi = 0.5 * round(2.0 * komi);
       hist.setKomi((float)komi);
@@ -399,8 +400,11 @@ int MainCmds::demoplay(int argc, const char* const* argv) {
   {
     Setup::initializeSession(cfg);
     int maxConcurrentEvals = params.numThreads * 2 + 16; // * 2 + 16 just to give plenty of headroom
+    int defaultMaxBatchSize = -1;
     nnEval = Setup::initializeNNEvaluator(
-      modelFile,modelFile,cfg,logger,seedRand,maxConcurrentEvals,NNPos::MAX_BOARD_LEN,NNPos::MAX_BOARD_LEN
+      modelFile,modelFile,cfg,logger,seedRand,maxConcurrentEvals,
+      NNPos::MAX_BOARD_LEN,NNPos::MAX_BOARD_LEN,defaultMaxBatchSize,
+      Setup::SETUP_FOR_OTHER
     );
   }
   logger.write("Loaded neural net");
@@ -441,7 +445,7 @@ int MainCmds::demoplay(int argc, const char* const* argv) {
 
     double callbackPeriod = 0.05;
 
-    auto callback = [&baseHist,&recentWinLossValues,&recentScores,&recentScoreStdevs](Search* search) {
+    auto callback = [&baseHist,&recentWinLossValues,&recentScores,&recentScoreStdevs](const Search* search) {
       writeLine(search,baseHist,recentWinLossValues,recentScores,recentScoreStdevs);
     };
 
@@ -457,8 +461,8 @@ int MainCmds::demoplay(int argc, const char* const* argv) {
       double searchFactor =
         //Speed up when either player is winning confidently, not just the winner only
         std::min(
-          Play::getSearchFactor(searchFactorWhenWinningThreshold,searchFactorWhenWinning,params,recentWinLossValues,P_BLACK),
-          Play::getSearchFactor(searchFactorWhenWinningThreshold,searchFactorWhenWinning,params,recentWinLossValues,P_WHITE)
+          PlayUtils::getSearchFactor(searchFactorWhenWinningThreshold,searchFactorWhenWinning,params,recentWinLossValues,P_BLACK),
+          PlayUtils::getSearchFactor(searchFactorWhenWinningThreshold,searchFactorWhenWinning,params,recentWinLossValues,P_WHITE)
         );
       Loc moveLoc = bot->genMoveSynchronousAnalyze(pla,tc,searchFactor,callbackPeriod,callback);
 

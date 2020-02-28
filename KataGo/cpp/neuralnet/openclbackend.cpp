@@ -83,14 +83,17 @@ struct LoadedModel {
   LoadedModel& operator=(const LoadedModel&) = delete;
 };
 
-LoadedModel* NeuralNet::loadModelFile(const string& file, int modelFileIdx) {
-  (void)modelFileIdx;
+LoadedModel* NeuralNet::loadModelFile(const string& file) {
   LoadedModel* loadedModel = new LoadedModel(file);
   return loadedModel;
 }
 
 void NeuralNet::freeLoadedModel(LoadedModel* loadedModel) {
   delete loadedModel;
+}
+
+string NeuralNet::getModelName(const LoadedModel* loadedModel) {
+  return loadedModel->modelDesc.name;
 }
 
 int NeuralNet::getModelVersion(const LoadedModel* loadedModel) {
@@ -122,6 +125,7 @@ struct CompiledPrograms {
   cl_program mirrorProgram;
   cl_program extractChannel0NCHWProgram;
   cl_program xgemmDirectProgram;
+  cl_program xgemmProgram;
 
   CompiledPrograms(const cl_context& context, const vector<cl_device_id>& deviceIdsToUse, const OpenCLTuneParams& tParams) {
     tuneParams = tParams;
@@ -161,6 +165,7 @@ struct CompiledPrograms {
     mirrorProgram = compileProgram("mirrorProgram", context, deviceIdsToUse, OpenCLKernels::mirror, "");
     extractChannel0NCHWProgram = compileProgram("extractChannel0NCHWProgram", context, deviceIdsToUse, OpenCLKernels::extractChannel0NCHW, "");
     xgemmDirectProgram = compileProgram("xgemmDirectProgram", context, deviceIdsToUse, OpenCLKernels::xgemmDirect, tuneParams.xGemmDirect.compileOptions());
+    xgemmProgram = compileProgram("xgemmProgram", context, deviceIdsToUse, OpenCLKernels::xgemm, tuneParams.xGemm.compileOptions());
   }
 
   ~CompiledPrograms() {
@@ -180,6 +185,7 @@ struct CompiledPrograms {
     clReleaseProgram(mirrorProgram);
     clReleaseProgram(extractChannel0NCHWProgram);
     clReleaseProgram(xgemmDirectProgram);
+    clReleaseProgram(xgemmProgram);
   }
 
   CompiledPrograms() = delete;
@@ -192,6 +198,10 @@ struct CompiledPrograms {
 struct ComputeContext {
   DevicesContext* devicesContext;
   map<string,CompiledPrograms*> compiledProgramsByDeviceName;
+  int nnXLen;
+  int nnYLen;
+  enabled_t usingFP16Mode;
+  enabled_t usingNHWCMode;
 
 #ifdef PROFILE_KERNELS
   static constexpr bool liveProfilingKernels = true;
@@ -199,7 +209,20 @@ struct ComputeContext {
   static constexpr bool liveProfilingKernels = false;
 #endif
 
-  ComputeContext(const vector<int>& gIdxs, Logger* logger, std::function<OpenCLTuneParams(const string&,int)> getParamsForDeviceName) {
+  ComputeContext(
+    const vector<int>& gIdxs,
+    Logger* logger,
+    int nnX,
+    int nnY,
+    enabled_t useFP16Mode,
+    enabled_t useNHWCMode,
+    std::function<OpenCLTuneParams(const string&,int)> getParamsForDeviceName
+  ) {
+    nnXLen = nnX;
+    nnYLen = nnY;
+    usingFP16Mode = useFP16Mode;
+    usingNHWCMode = useNHWCMode;
+
     vector<DeviceInfo> allDeviceInfos = DeviceInfo::getAllDeviceInfosOnSystem(logger);
     devicesContext = new DevicesContext(allDeviceInfos,gIdxs,logger,liveProfilingKernels);
 
@@ -233,8 +256,15 @@ struct ComputeContext {
 
 static ComputeContext* createComputeContextForTesting(
   const std::vector<int>& gpuIdxs,
-  Logger* logger
+  Logger* logger,
+  int nnXLen,
+  int nnYLen,
+  bool useFP16,
+  bool useNHWC
 ) {
+  enabled_t useFP16Mode = useFP16 ? enabled_t::True : enabled_t::False;
+  enabled_t useNHWCMode = useNHWC ? enabled_t::True : enabled_t::False;
+
   std::function<OpenCLTuneParams(const string&,int)> getParamsForDeviceName =
     [](const string& name, int gpuIdxForTuning) {
     (void)name;
@@ -242,9 +272,8 @@ static ComputeContext* createComputeContextForTesting(
     //Just use default values
     return OpenCLTuneParams();
   };
-  return new ComputeContext(gpuIdxs,logger,getParamsForDeviceName);
+  return new ComputeContext(gpuIdxs,logger,nnXLen,nnYLen,useFP16Mode,useNHWCMode,getParamsForDeviceName);
 }
-
 
 ComputeContext* NeuralNet::createComputeContext(
   const std::vector<int>& gpuIdxs,
@@ -253,6 +282,8 @@ ComputeContext* NeuralNet::createComputeContext(
   int nnYLen,
   string openCLTunerFile,
   bool openCLReTunePerBoardSize,
+  enabled_t useFP16Mode,
+  enabled_t useNHWCMode,
   const LoadedModel* loadedModel
 ) {
   if(gpuIdxs.size() <= 0)
@@ -263,7 +294,7 @@ ComputeContext* NeuralNet::createComputeContext(
     bool full = false;
     return OpenCLTuner::loadOrAutoTune(openCLTunerFile,name,gpuIdxForTuning,logger,openCLReTunePerBoardSize,nnXLen,nnYLen,&(loadedModel->modelDesc),full);
   };
-  return new ComputeContext(gpuIdxs,logger,getParamsForDeviceName);
+  return new ComputeContext(gpuIdxs,logger,nnXLen,nnYLen,useFP16Mode,useNHWCMode,getParamsForDeviceName);
 }
 
 void NeuralNet::freeComputeContext(ComputeContext* computeContext) {
@@ -282,8 +313,10 @@ struct ComputeHandleInternal {
   cl_kernel conv2dNCHWKernel;
 
   cl_kernel winogradConv3x3NCHWTransformKernel;
+  cl_kernel winogradConv3x3NCHWBNReluTransformKernel;
   cl_kernel winogradConv3x3NCHWUntransformKernel;
   cl_kernel winogradConv5x5NCHWTransformKernel;
+  cl_kernel winogradConv5x5NCHWBNReluTransformKernel;
   cl_kernel winogradConv5x5NCHWUntransformKernel;
   cl_kernel scaleBiasMaskNCHWKernel;
   cl_kernel scaleBiasMaskReluNCHWKernel;
@@ -297,23 +330,16 @@ struct ComputeHandleInternal {
   cl_kernel transposeNCHWKernel;
   cl_kernel mirrorKernel;
   cl_kernel extractChannel0NCHWKernel;
-  cl_kernel xgemmDirectBatchedNNKernel;
   cl_kernel xgemmDirectBatchedTTKernel;
   cl_kernel xgemmDirectStridedBatchedNNKernel;
+  cl_kernel xgemmBatchedNNKernel;
 
   vector<cl_event> profileEvents;
   vector<std::function<void()>> profileCallbacks;
   vector<std::function<void()>> profileResultPrinters;
 
-  ComputeHandleInternal(ComputeContext* ctx, int gpuIdx, bool inputsUseNHWC, bool useNHWC, bool useFP16) {
+  ComputeHandleInternal(ComputeContext* ctx, int gpuIdx, bool inputsUseNHWC) {
     computeContext = ctx;
-
-    if(inputsUseNHWC != false)
-      throw StringError("OpenCL backend: inputsUseNHWC = false required, other configurations not supported");
-    if(useNHWC != false)
-      throw StringError("OpenCL backend: useNHWC = false required, other configurations not supported");
-    if(useFP16 != false)
-      throw StringError("OpenCL backend: useFP16 = false required, other configurations not supported");
 
     clContext = computeContext->devicesContext->context;
     const InitializedDevice& device = computeContext->devicesContext->findGpuExn(gpuIdx);
@@ -322,16 +348,30 @@ struct ComputeHandleInternal {
     assert(progs != NULL);
     tuneParams = progs->tuneParams;
 
+    bool useNHWC = ctx->usingNHWCMode == enabled_t::True ? true : false;
+    bool useFP16 = ctx->usingFP16Mode == enabled_t::True ? true : false;
+
+    if(inputsUseNHWC != false)
+      throw StringError("OpenCL backend: inputsUseNHWC = false required, other configurations not supported");
+    if(useNHWC != false)
+      throw StringError("OpenCL backend: useNHWC = false required, other configurations not supported");
+    if(useFP16 != false)
+      throw StringError("OpenCL backend: useFP16 = false required, other configurations not supported");
+
     cl_int err;
     conv2dNCHWKernel = clCreateKernel(progs->conv2dNCHWProgram, "conv2dNCHW", &err);
     CHECK_ERR(err);
 
     winogradConv3x3NCHWTransformKernel = clCreateKernel(progs->winogradConv3x3NCHWProgram, "transform", &err);
     CHECK_ERR(err);
+    winogradConv3x3NCHWBNReluTransformKernel = clCreateKernel(progs->winogradConv3x3NCHWProgram, "bnReluTransform", &err);
+    CHECK_ERR(err);
     winogradConv3x3NCHWUntransformKernel = clCreateKernel(progs->winogradConv3x3NCHWProgram, "untransform", &err);
     CHECK_ERR(err);
 
     winogradConv5x5NCHWTransformKernel = clCreateKernel(progs->winogradConv5x5NCHWProgram, "transform", &err);
+    CHECK_ERR(err);
+    winogradConv5x5NCHWBNReluTransformKernel = clCreateKernel(progs->winogradConv5x5NCHWProgram, "bnReluTransform", &err);
     CHECK_ERR(err);
     winogradConv5x5NCHWUntransformKernel = clCreateKernel(progs->winogradConv5x5NCHWProgram, "untransform", &err);
     CHECK_ERR(err);
@@ -360,11 +400,11 @@ struct ComputeHandleInternal {
     CHECK_ERR(err);
     extractChannel0NCHWKernel = clCreateKernel(progs->extractChannel0NCHWProgram, "extractChannel0NCHW", &err);
     CHECK_ERR(err);
-    xgemmDirectBatchedNNKernel = clCreateKernel(progs->xgemmDirectProgram, "XgemmDirectBatchedNN", &err);
-    CHECK_ERR(err);
     xgemmDirectBatchedTTKernel = clCreateKernel(progs->xgemmDirectProgram, "XgemmDirectBatchedTT", &err);
     CHECK_ERR(err);
     xgemmDirectStridedBatchedNNKernel = clCreateKernel(progs->xgemmDirectProgram, "XgemmDirectStridedBatchedNN", &err);
+    CHECK_ERR(err);
+    xgemmBatchedNNKernel = clCreateKernel(progs->xgemmProgram, "XgemmBatched", &err);
     CHECK_ERR(err);
   }
 
@@ -376,8 +416,10 @@ struct ComputeHandleInternal {
 
     clReleaseKernel(conv2dNCHWKernel);
     clReleaseKernel(winogradConv3x3NCHWTransformKernel);
+    clReleaseKernel(winogradConv3x3NCHWBNReluTransformKernel);
     clReleaseKernel(winogradConv3x3NCHWUntransformKernel);
     clReleaseKernel(winogradConv5x5NCHWTransformKernel);
+    clReleaseKernel(winogradConv5x5NCHWBNReluTransformKernel);
     clReleaseKernel(winogradConv5x5NCHWUntransformKernel);
     clReleaseKernel(scaleBiasMaskNCHWKernel);
     clReleaseKernel(scaleBiasMaskReluNCHWKernel);
@@ -391,9 +433,9 @@ struct ComputeHandleInternal {
     clReleaseKernel(transposeNCHWKernel);
     clReleaseKernel(mirrorKernel);
     clReleaseKernel(extractChannel0NCHWKernel);
-    clReleaseKernel(xgemmDirectBatchedNNKernel);
     clReleaseKernel(xgemmDirectBatchedTTKernel);
     clReleaseKernel(xgemmDirectStridedBatchedNNKernel);
+    clReleaseKernel(xgemmBatchedNNKernel);
   }
 
   ComputeHandleInternal() = delete;
@@ -621,324 +663,6 @@ static void debugPrint4D(const string& name, ComputeHandleInternal* handle, cl_m
 
 //--------------------------------------------------------------
 
-struct ConvLayer {
-  string name;
-  int convYSize;
-  int convXSize;
-  int convYRadius;
-  int convXRadius;
-  int inChannels;
-  int outChannels;
-  int dilationY;
-  int dilationX;
-
-  int nnXLen;
-  int nnYLen;
-  cl_mem filter;
-
-  int numTilesX;
-  int numTilesY;
-  int inTileXYSize;
-  int outTileXYSize;
-
-  static constexpr int nKernelDims = 3;
-
-  ConvLayer(ComputeHandleInternal* handle, const ConvLayerDesc* desc, int nnX, int nnY) {
-    name = desc->name;
-    convYSize = desc->convYSize;
-    convXSize = desc->convXSize;
-    convYRadius = convYSize / 2;
-    convXRadius = convXSize / 2;
-    inChannels = desc->inChannels;
-    outChannels = desc->outChannels;
-    dilationY = desc->dilationY;
-    dilationX = desc->dilationX;
-
-    nnXLen = nnX;
-    nnYLen = nnY;
-
-    assert(convXSize % 2 == 1);
-    assert(convYSize % 2 == 1);
-    if(dilationX != 1 || dilationY != 1)
-      throw StringError("OpenCL backend: Encountered convolution dilation factors other than 1, not supported");
-
-    //Initial values unless overrided below
-    numTilesX = 0;
-    numTilesY = 0;
-    inTileXYSize = 0;
-    outTileXYSize = 0;
-
-    if(convXSize == 1 && convYSize == 1) {
-      //ic,oc
-      vector<float> transWeights(inChannels * outChannels);
-      for(int oc = 0; oc < outChannels; oc++) {
-        for(int ic = 0; ic < inChannels; ic++) {
-          transWeights[ic * outChannels + oc] = desc->weights[oc * inChannels + ic];
-        }
-      }
-      filter = createReadOnlyBuffer(handle,transWeights);
-    }
-    else if((convXSize == 3 && convYSize == 3) || (convXSize == 5 && convYSize == 5)) {
-      int inTileXSize = convXSize == 3 ? handle->tuneParams.conv3x3.INTILE_XSIZE : handle->tuneParams.conv5x5.INTILE_XSIZE;
-      int inTileYSize = convYSize == 3 ? handle->tuneParams.conv3x3.INTILE_YSIZE : handle->tuneParams.conv5x5.INTILE_YSIZE;
-      int outTileXSize = convXSize == 3 ? handle->tuneParams.conv3x3.OUTTILE_XSIZE : handle->tuneParams.conv5x5.OUTTILE_XSIZE;
-      int outTileYSize = convYSize == 3 ? handle->tuneParams.conv3x3.OUTTILE_YSIZE : handle->tuneParams.conv5x5.OUTTILE_YSIZE;
-
-      numTilesX = (nnXLen + outTileXSize - 1) / outTileXSize;
-      numTilesY = (nnYLen + outTileYSize - 1) / outTileYSize;
-      inTileXYSize = inTileXSize * inTileYSize;
-      outTileXYSize = outTileXSize * outTileYSize;
-
-      static constexpr int maxTileXSize = 6;
-      static constexpr int maxTileYSize = 6;
-
-      assert((convXSize == 3 && convYSize == 3) ? (inTileXSize == 4 && outTileXSize == 2) || (inTileXSize == 6 && outTileXSize == 4) : true);
-      assert((convXSize == 5 && convYSize == 5) ? (inTileYSize == 6 && outTileYSize == 2) : true);
-
-      //INTILE_YSIZE, INTILE_XSIZE, ic, oc
-      vector<float> transWeights(inTileXYSize * inChannels * outChannels);
-      auto transform3x3_4 = [](float& a0, float& a1, float& a2, float& a3) {
-        float z0 = a0; float z1 = a1; float z2 = a2;
-        a0 = z0;
-        a1 = 0.5f * (z0 + z1 + z2);
-        a2 = 0.5f * (z0 - z1 + z2);
-        a3 = z2;
-      };
-      auto transform3x3_6 = [](float& a0, float& a1, float& a2, float& a3, float& a4, float& a5) {
-        float z0 = a0; float z1 = a1; float z2 = a2;
-        // Low error winograd
-        // double sqrt2 = sqrt(2.0);
-        // a0 = z0;
-        // a1 = (float)( (1.0 / 3.0) * (-2.0*z0 - sqrt2*z1 - z2) );
-        // a2 = (float)( (1.0 / 3.0) * (-2.0*z0 + sqrt2*z1 - z2) );
-        // a3 = (float)( (1.0 / 6.0) * (z0 + sqrt2*z1 + 2.0*z2) );
-        // a4 = (float)( (1.0 / 6.0) * (z0 - sqrt2*z1 + 2.0*z2) );
-        // a5 = z2;
-        a0 = 0.25f * z0;
-        a1 = (float)( (1.0 / 6.0) * (-z0 - z1 - z2) );
-        a2 = (float)( (1.0 / 6.0) * (-z0 + z1 - z2) );
-        a3 = (float)( (1.0 / 24.0) * (z0 + 2.0*z1 + 4.0*z2) );
-        a4 = (float)( (1.0 / 24.0) * (z0 - 2.0*z1 + 4.0*z2) );
-        a5 = 1.0f * z2;
-      };
-      auto transform5x5_6 = [](float& a0, float& a1, float& a2, float& a3, float& a4, float& a5) {
-        float z0 = a0; float z1 = a1; float z2 = a2; float z3 = a3; float z4 = a4;
-        a0 = 0.25f * z0;
-        a1 = (float)( (1.0 / 6.0) * (-z0 - z1 - z2 - z3 - z4) );
-        a2 = (float)( (1.0 / 6.0) * (-z0 + z1 - z2 + z3 - z4) );
-        a3 = (float)( (1.0 / 24.0) * (z0 + 2.0*z1 + 4.0*z2 + 8.0*z3 + 16.0*z4) );
-        a4 = (float)( (1.0 / 24.0) * (z0 - 2.0*z1 + 4.0*z2 - 8.0*z3 + 16.0*z4) );
-        a5 = 1.0f * z4;
-      };
-
-      for(int oc = 0; oc < outChannels; oc++) {
-        for(int ic = 0; ic < inChannels; ic++) {
-          float tmp[maxTileYSize][maxTileXSize];
-          for(int subY = 0; subY < convYSize; subY++) {
-            for(int subX = 0; subX < convXSize; subX++) {
-              tmp[subY][subX] = desc->weights[((oc * inChannels + ic) * convYSize + subY) * convXSize + subX];
-            }
-          }
-
-          if(convXSize == 3 && inTileXSize == 4) {
-            for(int subY = 0; subY < convYSize; subY++)
-              transform3x3_4(tmp[subY][0], tmp[subY][1], tmp[subY][2], tmp[subY][3]);
-          }
-          else if(convXSize == 3 && inTileXSize == 6) {
-            for(int subY = 0; subY < convYSize; subY++)
-              transform3x3_6(tmp[subY][0], tmp[subY][1], tmp[subY][2], tmp[subY][3], tmp[subY][4], tmp[subY][5]);
-          }
-          else if(convXSize == 5 && inTileXSize == 6) {
-            for(int subY = 0; subY < convYSize; subY++)
-              transform5x5_6(tmp[subY][0], tmp[subY][1], tmp[subY][2], tmp[subY][3], tmp[subY][4], tmp[subY][5]);
-          }
-
-          if(convYSize == 3 && inTileYSize == 4) {
-            for(int subX = 0; subX < inTileXSize; subX++)
-              transform3x3_4(tmp[0][subX], tmp[1][subX], tmp[2][subX], tmp[3][subX]);
-          }
-          else if(convYSize == 3 && inTileYSize == 6) {
-            for(int subX = 0; subX < inTileXSize; subX++)
-              transform3x3_6(tmp[0][subX], tmp[1][subX], tmp[2][subX], tmp[3][subX], tmp[4][subX], tmp[5][subX]);
-          }
-          else if(convYSize == 5 && inTileYSize == 6) {
-            for(int subX = 0; subX < inTileXSize; subX++)
-              transform5x5_6(tmp[0][subX], tmp[1][subX], tmp[2][subX], tmp[3][subX], tmp[4][subX], tmp[5][subX]);
-          }
-
-          for(int subY = 0; subY < inTileYSize; subY++) {
-            for(int subX = 0; subX < inTileXSize; subX++) {
-              transWeights[((subY*inTileXSize + subX)*inChannels + ic)*outChannels + oc] = tmp[subY][subX];
-            }
-          }
-        }
-      }
-
-      filter = createReadOnlyBuffer(handle,transWeights);
-    }
-    else {
-      vector<float> weights = desc->weights;
-      filter = createReadOnlyBuffer(handle,weights);
-    }
-  }
-
-  ~ConvLayer() {
-    clReleaseMemObject(filter);
-  }
-
-  size_t requiredConvWorkspaceElts(size_t maxBatchSize) const {
-    static const size_t roundSizeNeeded = 1;
-    return
-      roundUpToMultiple(numTilesX * numTilesY * maxBatchSize, roundSizeNeeded) *
-      roundUpToMultiple(std::max(inChannels,outChannels),roundSizeNeeded) *
-      inTileXYSize;
-  }
-
-  void apply(ComputeHandleInternal* handle, int batchSize, cl_mem input, cl_mem output, cl_mem convWorkspace, cl_mem convWorkspace2) {
-    if(convXSize == 1 && convYSize == 1) {
-      int filterStride = 0; //Reuse same filter for all matrices in batch
-      int inputStride = nnXLen*nnYLen * inChannels;
-      int outputStride = nnXLen*nnYLen * outChannels;
-      cl_int err;
-      MAYBE_EVENT;
-      err = doStridedBatchedXGemm_KM_KN_MN(
-        handle->xgemmDirectStridedBatchedNNKernel,
-        handle->commandQueue,
-        handle->tuneParams,
-        outChannels, nnXLen*nnYLen, inChannels,
-        filterStride, inputStride, outputStride,
-        filter, input, output,
-        batchSize,
-        MAYBE_EVENTREF
-      );
-      CHECK_ERR(err);
-      MAYBE_PROFILE("MATMULCONV1x1");
-      MAYBE_FREE_EVENT;
-    }
-    else if((convXSize == 3 && convYSize == 3) || (convXSize == 5 && convYSize == 5)) {
-
-      {
-        cl_int err;
-        MAYBE_EVENT;
-        err = doWinogradTransform(
-          (convXSize == 3 && convYSize == 3) ?
-          handle->winogradConv3x3NCHWTransformKernel :
-          handle->winogradConv5x5NCHWTransformKernel,
-          handle->commandQueue,
-          handle->tuneParams,
-          input,convWorkspace,
-          batchSize,nnXLen,nnYLen,
-          numTilesX,numTilesY,
-          inChannels,
-          convXSize,
-          MAYBE_EVENTREF
-        );
-        CHECK_ERR(err);
-        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("3x3TRANSFORM"); }
-        else { MAYBE_PROFILE("5x5TRANSFORM"); }
-        MAYBE_FREE_EVENT;
-      }
-
-      {
-        int numTilesTotal = batchSize * numTilesX * numTilesY;
-        cl_int err;
-        MAYBE_EVENT;
-        err = doBatchedXGemm_KM_KN_MN(
-          handle->xgemmDirectBatchedNNKernel,
-          handle->commandQueue,
-          handle->tuneParams,
-          outChannels, numTilesTotal, inChannels,
-          filter, convWorkspace, convWorkspace2,
-          inTileXYSize,
-          MAYBE_EVENTREF
-        );
-        CHECK_ERR(err);
-        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("MATMULCONV3x3"); }
-        else { MAYBE_PROFILE("MATMULCONV5x5"); }
-        MAYBE_FREE_EVENT;
-      }
-
-      {
-        cl_int err;
-        MAYBE_EVENT;
-        err = doWinogradUntransform(
-          (convXSize == 3 && convYSize == 3) ?
-          handle->winogradConv3x3NCHWUntransformKernel :
-          handle->winogradConv5x5NCHWUntransformKernel,
-          handle->commandQueue,
-          handle->tuneParams,
-          convWorkspace2,output,
-          batchSize,nnXLen,nnYLen,
-          numTilesX,numTilesY,
-          outChannels,
-          convXSize,
-          MAYBE_EVENTREF
-        );
-        CHECK_ERR(err);
-        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("3x3UNTRANSFORM"); }
-        else { MAYBE_PROFILE("5x5UNTRANSFORM"); }
-        MAYBE_FREE_EVENT;
-      }
-
-    }
-
-    else {
-      cl_kernel kernel = handle->conv2dNCHWKernel;
-      clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&input);
-      clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&filter);
-      clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&output);
-
-      //TODO throw this all away and just use winograd entirely
-      static const size_t TILE_XSIZE = 32;
-      static const size_t TILE_YSIZE = 4;
-      static const size_t TILE_CHANNELS = 4;
-      const size_t inputTileXSize = TILE_XSIZE + 2*convXRadius;
-      const size_t inputTileYSize = TILE_YSIZE + 2*convYRadius;
-      clSetKernelArg(kernel, 3, sizeof(float) * TILE_CHANNELS * inputTileXSize * inputTileYSize, NULL);
-      clSetKernelArg(kernel, 4, sizeof(float) * TILE_XSIZE * TILE_YSIZE, NULL);
-      clSetKernelArg(kernel, 5, sizeof(int), (void *)&batchSize);
-      clSetKernelArg(kernel, 6, sizeof(int), (void *)&nnXLen);
-      clSetKernelArg(kernel, 7, sizeof(int), (void *)&nnYLen);
-      clSetKernelArg(kernel, 8, sizeof(int), (void *)&outChannels);
-      clSetKernelArg(kernel, 9, sizeof(int), (void *)&inChannels);
-      clSetKernelArg(kernel, 10, sizeof(int), (void *)&convXRadius);
-      clSetKernelArg(kernel, 11, sizeof(int), (void *)&convYRadius);
-
-      static const int workPerThreadX = 1;
-      static const int workPerThreadY = 1;
-      size_t localSizes[nKernelDims];
-      localSizes[0] = TILE_XSIZE / workPerThreadX;
-      localSizes[1] = TILE_YSIZE / workPerThreadY;
-      localSizes[2] = 1;
-
-      size_t globalSizes[nKernelDims];
-      globalSizes[0] = roundUpToMultiple(nnXLen,TILE_XSIZE);
-      globalSizes[1] = roundUpToMultiple(nnYLen,TILE_YSIZE);
-      globalSizes[2] = outChannels;
-
-      cl_int err;
-      MAYBE_EVENT;
-      err = clEnqueueNDRangeKernel(
-        handle->commandQueue, kernel, nKernelDims, NULL, globalSizes, localSizes, 0, NULL, MAYBE_EVENTREF
-      );
-      CHECK_ERR(err);
-      if(convXRadius == 2 && convYRadius == 2) {
-        MAYBE_PROFILE("CONV5");
-      }
-      else {
-        MAYBE_PROFILE("CONV");
-      }
-      MAYBE_FREE_EVENT;
-    }
-  }
-
-  ConvLayer() = delete;
-  ConvLayer(const ConvLayer&) = delete;
-  ConvLayer& operator=(const ConvLayer&) = delete;
-};
-
-//--------------------------------------------------------------
-
 struct BatchNormLayer {
   string name;
   int numChannels;
@@ -1020,22 +744,411 @@ struct BatchNormLayer {
 
 //--------------------------------------------------------------
 
-struct ActivationLayer {
+struct ConvLayer {
   string name;
+  int convYSize;
+  int convXSize;
+  int convYRadius;
+  int convXRadius;
+  int inChannels;
+  int outChannels;
+  int dilationY;
+  int dilationX;
 
-  ActivationLayer(
-    ComputeHandleInternal* handle, const ActivationLayerDesc* desc
-  ) {
-    (void)handle;
+  int nnXLen;
+  int nnYLen;
+  cl_mem filter;
+
+  int numTilesX;
+  int numTilesY;
+  int inTileXYSize;
+  int outTileXYSize;
+
+  static constexpr int nKernelDims = 3;
+
+  ConvLayer(ComputeHandleInternal* handle, const ConvLayerDesc* desc, int nnX, int nnY) {
     name = desc->name;
+    convYSize = desc->convYSize;
+    convXSize = desc->convXSize;
+    convYRadius = convYSize / 2;
+    convXRadius = convXSize / 2;
+    inChannels = desc->inChannels;
+    outChannels = desc->outChannels;
+    dilationY = desc->dilationY;
+    dilationX = desc->dilationX;
+
+    nnXLen = nnX;
+    nnYLen = nnY;
+
+    assert(convXSize % 2 == 1);
+    assert(convYSize % 2 == 1);
+    if(dilationX != 1 || dilationY != 1)
+      throw StringError("OpenCL backend: Encountered convolution dilation factors other than 1, not supported");
+
+    //Initial values unless overrided below
+    numTilesX = 0;
+    numTilesY = 0;
+    inTileXYSize = 0;
+    outTileXYSize = 0;
+
+    if(convXSize == 1 && convYSize == 1) {
+      //ic,oc
+      vector<float> transWeights(inChannels * outChannels);
+      for(int oc = 0; oc < outChannels; oc++) {
+        for(int ic = 0; ic < inChannels; ic++) {
+          transWeights[ic * outChannels + oc] = desc->weights[oc * inChannels + ic];
+        }
+      }
+      filter = createReadOnlyBuffer(handle,transWeights);
+    }
+    else if((convXSize == 3 && convYSize == 3) || (convXSize == 5 && convYSize == 5)) {
+      int inTileXSize = convXSize == 3 ? handle->tuneParams.conv3x3.INTILE_XSIZE : handle->tuneParams.conv5x5.INTILE_XSIZE;
+      int inTileYSize = convYSize == 3 ? handle->tuneParams.conv3x3.INTILE_YSIZE : handle->tuneParams.conv5x5.INTILE_YSIZE;
+      int outTileXSize = convXSize == 3 ? handle->tuneParams.conv3x3.OUTTILE_XSIZE : handle->tuneParams.conv5x5.OUTTILE_XSIZE;
+      int outTileYSize = convYSize == 3 ? handle->tuneParams.conv3x3.OUTTILE_YSIZE : handle->tuneParams.conv5x5.OUTTILE_YSIZE;
+
+      int outChannelsPadded = roundUpToMultiple(outChannels, handle->tuneParams.xGemm.NWG);
+      int inChannelsPadded = roundUpToMultiple(inChannels, handle->tuneParams.xGemm.KWG);
+
+      numTilesX = (nnXLen + outTileXSize - 1) / outTileXSize;
+      numTilesY = (nnYLen + outTileYSize - 1) / outTileYSize;
+      inTileXYSize = inTileXSize * inTileYSize;
+      outTileXYSize = outTileXSize * outTileYSize;
+
+      static constexpr int maxTileXSize = 6;
+      static constexpr int maxTileYSize = 6;
+
+      assert((convXSize == 3 && convYSize == 3) ? (inTileXSize == 4 && outTileXSize == 2) || (inTileXSize == 6 && outTileXSize == 4) : true);
+      assert((convXSize == 5 && convYSize == 5) ? (inTileYSize == 6 && outTileYSize == 2) : true);
+
+      //INTILE_YSIZE, INTILE_XSIZE, ic, oc
+      vector<float> transWeights(inTileXYSize * inChannelsPadded * outChannelsPadded);
+      auto transform3x3_4 = [](float& a0, float& a1, float& a2, float& a3) {
+        float z0 = a0; float z1 = a1; float z2 = a2;
+        a0 = z0;
+        a1 = 0.5f * (z0 + z1 + z2);
+        a2 = 0.5f * (z0 - z1 + z2);
+        a3 = z2;
+      };
+      auto transform3x3_6 = [](float& a0, float& a1, float& a2, float& a3, float& a4, float& a5) {
+        float z0 = a0; float z1 = a1; float z2 = a2;
+        // Low error winograd
+        // double sqrt2 = sqrt(2.0);
+        // a0 = z0;
+        // a1 = (float)( (1.0 / 3.0) * (-2.0*z0 - sqrt2*z1 - z2) );
+        // a2 = (float)( (1.0 / 3.0) * (-2.0*z0 + sqrt2*z1 - z2) );
+        // a3 = (float)( (1.0 / 6.0) * (z0 + sqrt2*z1 + 2.0*z2) );
+        // a4 = (float)( (1.0 / 6.0) * (z0 - sqrt2*z1 + 2.0*z2) );
+        // a5 = z2;
+        a0 = 0.25f * z0;
+        a1 = (float)( (1.0 / 6.0) * (-z0 - z1 - z2) );
+        a2 = (float)( (1.0 / 6.0) * (-z0 + z1 - z2) );
+        a3 = (float)( (1.0 / 24.0) * (z0 + 2.0*z1 + 4.0*z2) );
+        a4 = (float)( (1.0 / 24.0) * (z0 - 2.0*z1 + 4.0*z2) );
+        a5 = 1.0f * z2;
+      };
+      auto transform5x5_6 = [](float& a0, float& a1, float& a2, float& a3, float& a4, float& a5) {
+        float z0 = a0; float z1 = a1; float z2 = a2; float z3 = a3; float z4 = a4;
+        a0 = 0.25f * z0;
+        a1 = (float)( (1.0 / 6.0) * (-z0 - z1 - z2 - z3 - z4) );
+        a2 = (float)( (1.0 / 6.0) * (-z0 + z1 - z2 + z3 - z4) );
+        a3 = (float)( (1.0 / 24.0) * (z0 + 2.0*z1 + 4.0*z2 + 8.0*z3 + 16.0*z4) );
+        a4 = (float)( (1.0 / 24.0) * (z0 - 2.0*z1 + 4.0*z2 - 8.0*z3 + 16.0*z4) );
+        a5 = 1.0f * z4;
+      };
+
+      for(int oc = 0; oc < outChannelsPadded; oc++) {
+        for(int ic = 0; ic < inChannelsPadded; ic++) {
+          float tmp[maxTileYSize][maxTileXSize];
+          for(int subY = 0; subY < convYSize; subY++) {
+            for(int subX = 0; subX < convXSize; subX++) {
+              if(oc < outChannels && ic < inChannels)
+                tmp[subY][subX] = desc->weights[((oc * inChannels + ic) * convYSize + subY) * convXSize + subX];
+              else
+                tmp[subY][subX] = 0.0f;
+            }
+          }
+
+          if(convXSize == 3 && inTileXSize == 4) {
+            for(int subY = 0; subY < convYSize; subY++)
+              transform3x3_4(tmp[subY][0], tmp[subY][1], tmp[subY][2], tmp[subY][3]);
+          }
+          else if(convXSize == 3 && inTileXSize == 6) {
+            for(int subY = 0; subY < convYSize; subY++)
+              transform3x3_6(tmp[subY][0], tmp[subY][1], tmp[subY][2], tmp[subY][3], tmp[subY][4], tmp[subY][5]);
+          }
+          else if(convXSize == 5 && inTileXSize == 6) {
+            for(int subY = 0; subY < convYSize; subY++)
+              transform5x5_6(tmp[subY][0], tmp[subY][1], tmp[subY][2], tmp[subY][3], tmp[subY][4], tmp[subY][5]);
+          }
+
+          if(convYSize == 3 && inTileYSize == 4) {
+            for(int subX = 0; subX < inTileXSize; subX++)
+              transform3x3_4(tmp[0][subX], tmp[1][subX], tmp[2][subX], tmp[3][subX]);
+          }
+          else if(convYSize == 3 && inTileYSize == 6) {
+            for(int subX = 0; subX < inTileXSize; subX++)
+              transform3x3_6(tmp[0][subX], tmp[1][subX], tmp[2][subX], tmp[3][subX], tmp[4][subX], tmp[5][subX]);
+          }
+          else if(convYSize == 5 && inTileYSize == 6) {
+            for(int subX = 0; subX < inTileXSize; subX++)
+              transform5x5_6(tmp[0][subX], tmp[1][subX], tmp[2][subX], tmp[3][subX], tmp[4][subX], tmp[5][subX]);
+          }
+
+          for(int subY = 0; subY < inTileYSize; subY++) {
+            for(int subX = 0; subX < inTileXSize; subX++) {
+              transWeights[((subY*inTileXSize + subX)*inChannelsPadded + ic)*outChannelsPadded + oc] = tmp[subY][subX];
+            }
+          }
+        }
+      }
+
+      filter = createReadOnlyBuffer(handle,transWeights);
+    }
+    else {
+      vector<float> weights = desc->weights;
+      filter = createReadOnlyBuffer(handle,weights);
+    }
   }
 
-  ~ActivationLayer() {
+  ~ConvLayer() {
+    clReleaseMemObject(filter);
   }
 
-  ActivationLayer() = delete;
-  ActivationLayer(const ActivationLayer&) = delete;
-  ActivationLayer& operator=(const ActivationLayer&) = delete;
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle, size_t maxBatchSize) const {
+    int numTilesTotalPadded = roundUpToMultiple(maxBatchSize * numTilesX * numTilesY, handle->tuneParams.xGemm.MWG);
+    int outChannelsPadded = roundUpToMultiple(outChannels, handle->tuneParams.xGemm.NWG);
+    int inChannelsPadded = roundUpToMultiple(inChannels, handle->tuneParams.xGemm.KWG);
+    return
+      numTilesTotalPadded *
+      std::max(inChannelsPadded,outChannelsPadded) *
+      inTileXYSize;
+  }
+
+  void apply(ComputeHandleInternal* handle, int batchSize, cl_mem input, cl_mem output, cl_mem convWorkspace, cl_mem convWorkspace2) {
+    if(convXSize == 1 && convYSize == 1) {
+      int filterStride = 0; //Reuse same filter for all matrices in batch
+      int inputStride = nnXLen*nnYLen * inChannels;
+      int outputStride = nnXLen*nnYLen * outChannels;
+      cl_int err;
+      MAYBE_EVENT;
+      err = doStridedBatchedXGemmDirect_KM_KN_NM(
+        handle->xgemmDirectStridedBatchedNNKernel,
+        handle->commandQueue,
+        handle->tuneParams,
+        nnXLen*nnYLen, outChannels, inChannels,
+        inputStride, filterStride, outputStride,
+        input, filter, output,
+        batchSize,
+        MAYBE_EVENTREF
+      );
+      CHECK_ERR(err);
+      MAYBE_PROFILE("MATMULCONV1x1");
+      MAYBE_FREE_EVENT;
+    }
+    else if((convXSize == 3 && convYSize == 3) || (convXSize == 5 && convYSize == 5)) {
+
+      {
+        cl_int err;
+        MAYBE_EVENT;
+        err = doWinogradTransform(
+          (convXSize == 3 && convYSize == 3) ?
+          handle->winogradConv3x3NCHWTransformKernel :
+          handle->winogradConv5x5NCHWTransformKernel,
+          handle->commandQueue,
+          handle->tuneParams,
+          input,convWorkspace,
+          nnXLen,nnYLen,
+          batchSize,numTilesX,numTilesY,handle->tuneParams.xGemm.MWG, //M in gemm
+          inChannels,handle->tuneParams.xGemm.KWG,                    //K in gemm
+          convXSize,
+          MAYBE_EVENTREF
+        );
+        CHECK_ERR(err);
+        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("3x3TRANSFORM"); }
+        else { MAYBE_PROFILE("5x5TRANSFORM"); }
+        MAYBE_FREE_EVENT;
+      }
+
+      {
+        int numTilesTotalPadded = roundUpToMultiple(batchSize * numTilesX * numTilesY, handle->tuneParams.xGemm.MWG);
+        int outChannelsPadded = roundUpToMultiple(outChannels, handle->tuneParams.xGemm.NWG);
+        int inChannelsPadded = roundUpToMultiple(inChannels, handle->tuneParams.xGemm.KWG);
+
+        cl_int err;
+        MAYBE_EVENT;
+        err = doBatchedXGemm_KM_KN_NM(
+          handle->xgemmBatchedNNKernel,
+          handle->commandQueue,
+          handle->tuneParams,
+          numTilesTotalPadded, outChannelsPadded, inChannelsPadded,
+          convWorkspace, filter, convWorkspace2,
+          inTileXYSize,
+          MAYBE_EVENTREF
+        );
+        CHECK_ERR(err);
+        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("MATMULCONV3x3"); }
+        else { MAYBE_PROFILE("MATMULCONV5x5"); }
+        MAYBE_FREE_EVENT;
+      }
+
+      {
+        cl_int err;
+        MAYBE_EVENT;
+        err = doWinogradUntransform(
+          (convXSize == 3 && convYSize == 3) ?
+          handle->winogradConv3x3NCHWUntransformKernel :
+          handle->winogradConv5x5NCHWUntransformKernel,
+          handle->commandQueue,
+          handle->tuneParams,
+          convWorkspace2,output,
+          nnXLen,nnYLen,
+          batchSize,numTilesX,numTilesY,handle->tuneParams.xGemm.MWG, //M in gemm
+          outChannels,handle->tuneParams.xGemm.NWG,                   //N in gemm
+          convXSize,
+          MAYBE_EVENTREF
+        );
+        CHECK_ERR(err);
+        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("3x3UNTRANSFORM"); }
+        else { MAYBE_PROFILE("5x5UNTRANSFORM"); }
+        MAYBE_FREE_EVENT;
+      }
+
+    }
+
+    else {
+      cl_kernel kernel = handle->conv2dNCHWKernel;
+      clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&input);
+      clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&filter);
+      clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&output);
+
+      //TODO throw this all away and just use winograd entirely
+      static const size_t TILE_XSIZE = 32;
+      static const size_t TILE_YSIZE = 4;
+      static const size_t TILE_CHANNELS = 4;
+      const size_t inputTileXSize = TILE_XSIZE + 2*convXRadius;
+      const size_t inputTileYSize = TILE_YSIZE + 2*convYRadius;
+      clSetKernelArg(kernel, 3, sizeof(float) * TILE_CHANNELS * inputTileXSize * inputTileYSize, NULL);
+      clSetKernelArg(kernel, 4, sizeof(float) * TILE_XSIZE * TILE_YSIZE, NULL);
+      clSetKernelArg(kernel, 5, sizeof(int), (void *)&batchSize);
+      clSetKernelArg(kernel, 6, sizeof(int), (void *)&nnXLen);
+      clSetKernelArg(kernel, 7, sizeof(int), (void *)&nnYLen);
+      clSetKernelArg(kernel, 8, sizeof(int), (void *)&outChannels);
+      clSetKernelArg(kernel, 9, sizeof(int), (void *)&inChannels);
+      clSetKernelArg(kernel, 10, sizeof(int), (void *)&convXRadius);
+      clSetKernelArg(kernel, 11, sizeof(int), (void *)&convYRadius);
+
+      static const int workPerThreadX = 1;
+      static const int workPerThreadY = 1;
+      size_t localSizes[nKernelDims];
+      localSizes[0] = TILE_XSIZE / workPerThreadX;
+      localSizes[1] = TILE_YSIZE / workPerThreadY;
+      localSizes[2] = 1;
+
+      size_t globalSizes[nKernelDims];
+      globalSizes[0] = roundUpToMultiple(nnXLen,TILE_XSIZE);
+      globalSizes[1] = roundUpToMultiple(nnYLen,TILE_YSIZE);
+      globalSizes[2] = outChannels;
+
+      cl_int err;
+      MAYBE_EVENT;
+      err = clEnqueueNDRangeKernel(
+        handle->commandQueue, kernel, nKernelDims, NULL, globalSizes, localSizes, 0, NULL, MAYBE_EVENTREF
+      );
+      CHECK_ERR(err);
+      if(convXRadius == 2 && convYRadius == 2) {
+        MAYBE_PROFILE("CONV5");
+      }
+      else {
+        MAYBE_PROFILE("CONV");
+      }
+      MAYBE_FREE_EVENT;
+    }
+  }
+
+  void applyWithBNRelu(
+    ComputeHandleInternal* handle, BatchNormLayer* bnLayer, int batchSize,
+    cl_mem input, cl_mem output, cl_mem mask, cl_mem convWorkspace, cl_mem convWorkspace2
+  ) {
+    if((convXSize == 3 && convYSize == 3) || (convXSize == 5 && convYSize == 5)) {
+      {
+        cl_int err;
+        MAYBE_EVENT;
+        err = doWinogradTransformWithBNRelu(
+          (convXSize == 3 && convYSize == 3) ?
+          handle->winogradConv3x3NCHWBNReluTransformKernel :
+          handle->winogradConv5x5NCHWBNReluTransformKernel,
+          handle->commandQueue,
+          handle->tuneParams,
+          input,convWorkspace,
+          bnLayer->mergedScaleBuf,
+          bnLayer->mergedBiasBuf,
+          mask,
+          nnXLen,nnYLen,
+          batchSize,numTilesX,numTilesY,handle->tuneParams.xGemm.MWG, //M in gemm
+          inChannels,handle->tuneParams.xGemm.KWG,                    //K in gemm
+          convXSize,
+          MAYBE_EVENTREF
+        );
+        CHECK_ERR(err);
+        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("3x3TRANSFORM"); }
+        else { MAYBE_PROFILE("5x5TRANSFORM"); }
+        MAYBE_FREE_EVENT;
+      }
+
+      {
+        int numTilesTotalPadded = roundUpToMultiple(batchSize * numTilesX * numTilesY, handle->tuneParams.xGemm.MWG);
+        int outChannelsPadded = roundUpToMultiple(outChannels, handle->tuneParams.xGemm.NWG);
+        int inChannelsPadded = roundUpToMultiple(inChannels, handle->tuneParams.xGemm.KWG);
+
+        cl_int err;
+        MAYBE_EVENT;
+        err = doBatchedXGemm_KM_KN_NM(
+          handle->xgemmBatchedNNKernel,
+          handle->commandQueue,
+          handle->tuneParams,
+          numTilesTotalPadded, outChannelsPadded, inChannelsPadded,
+          convWorkspace, filter, convWorkspace2,
+          inTileXYSize,
+          MAYBE_EVENTREF
+        );
+        CHECK_ERR(err);
+        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("MATMULCONV3x3"); }
+        else { MAYBE_PROFILE("MATMULCONV5x5"); }
+        MAYBE_FREE_EVENT;
+      }
+
+      {
+        cl_int err;
+        MAYBE_EVENT;
+        err = doWinogradUntransform(
+          (convXSize == 3 && convYSize == 3) ?
+          handle->winogradConv3x3NCHWUntransformKernel :
+          handle->winogradConv5x5NCHWUntransformKernel,
+          handle->commandQueue,
+          handle->tuneParams,
+          convWorkspace2,output,
+          nnXLen,nnYLen,
+          batchSize,numTilesX,numTilesY,handle->tuneParams.xGemm.MWG, //M in gemm
+          outChannels,handle->tuneParams.xGemm.NWG,                   //N in gemm
+          convXSize,
+          MAYBE_EVENTREF
+        );
+        CHECK_ERR(err);
+        if(convXSize == 3 && convYSize == 3) { MAYBE_PROFILE("3x3UNTRANSFORM"); }
+        else { MAYBE_PROFILE("5x5UNTRANSFORM"); }
+        MAYBE_FREE_EVENT;
+      }
+
+    }
+    else {
+      throw StringError("Attempted ConvLayer::applyWithBNRelu on non-3x3 or non-5x5 conv, implementation dues not currently support this");
+    }
+  }
+
+  ConvLayer() = delete;
+  ConvLayer(const ConvLayer&) = delete;
+  ConvLayer& operator=(const ConvLayer&) = delete;
 };
 
 //--------------------------------------------------------------
@@ -1069,7 +1182,7 @@ struct MatMulLayer {
 
   void apply(ComputeHandleInternal* handle, int batchSize, cl_mem input, cl_mem output) {
     MAYBE_EVENT;
-    cl_int err = doBatchedXGemm_MK_NK_MN(
+    cl_int err = doBatchedXGemmDirect_MK_NK_MN(
       handle->xgemmDirectBatchedTTKernel,
       handle->commandQueue,
       handle->tuneParams,
@@ -1142,10 +1255,8 @@ struct MatBiasLayer {
 struct ResidualBlock {
   string name;
   BatchNormLayer preBN;
-  ActivationLayer preActivation;
   ConvLayer regularConv;
   BatchNormLayer midBN;
-  ActivationLayer midActivation;
   ConvLayer finalConv;
 
   int nnXLen;
@@ -1158,10 +1269,8 @@ struct ResidualBlock {
     int nnX, int nnY
   ): name(desc->name),
      preBN(handle,&desc->preBN,nnX,nnY),
-     preActivation(handle,&desc->preActivation),
      regularConv(handle,&desc->regularConv,nnX,nnY),
      midBN(handle,&desc->midBN,nnX,nnY),
-     midActivation(handle,&desc->midActivation),
      finalConv(handle,&desc->finalConv,nnX,nnY),
      nnXLen(nnX),
      nnYLen(nnY),
@@ -1172,8 +1281,11 @@ struct ResidualBlock {
   ~ResidualBlock() {
   }
 
-  size_t requiredConvWorkspaceElts(size_t maxBatchSize) const {
-    return std::max(regularConv.requiredConvWorkspaceElts(maxBatchSize), finalConv.requiredConvWorkspaceElts(maxBatchSize));
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle, size_t maxBatchSize) const {
+    return std::max(
+      regularConv.requiredConvWorkspaceElts(handle,maxBatchSize),
+      finalConv.requiredConvWorkspaceElts(handle,maxBatchSize)
+    );
   }
 
   void apply(
@@ -1187,10 +1299,19 @@ struct ResidualBlock {
     cl_mem convWorkspace,
     cl_mem convWorkspace2
   ) {
-    preBN.apply(handle,batchSize,true,trunk,trunkScratch,mask);
-    regularConv.apply(handle,batchSize,trunkScratch,mid,convWorkspace,convWorkspace2);
-    midBN.apply(handle,batchSize,true,mid,midScratch,mask);
-    finalConv.apply(handle,batchSize,midScratch,trunkScratch,convWorkspace,convWorkspace2);
+    (void)midScratch;
+    if((regularConv.convXSize == 3 && regularConv.convYSize == 3) || (regularConv.convXSize == 5 && regularConv.convYSize == 5))
+      regularConv.applyWithBNRelu(handle,&preBN,batchSize,trunk,mid,mask,convWorkspace,convWorkspace2);
+    else {
+      preBN.apply(handle,batchSize,true,trunk,trunkScratch,mask);
+      regularConv.apply(handle,batchSize,trunkScratch,mid,convWorkspace,convWorkspace2);
+    }
+    if((finalConv.convXSize == 3 && finalConv.convYSize == 3) || (finalConv.convXSize == 5 && finalConv.convYSize == 5))
+      finalConv.applyWithBNRelu(handle,&midBN,batchSize,mid,trunkScratch,mask,convWorkspace,convWorkspace2);
+    else {
+      midBN.apply(handle,batchSize,true,mid,midScratch,mask);
+      finalConv.apply(handle,batchSize,midScratch,trunkScratch,convWorkspace,convWorkspace2);
+    }
     addPointWise(handle, trunk, trunkScratch, batchSize * finalConv.outChannels * nnYLen * nnXLen);
   }
 
@@ -1205,14 +1326,11 @@ struct ResidualBlock {
 struct GlobalPoolingResidualBlock {
   string name;
   BatchNormLayer preBN;
-  ActivationLayer preActivation;
   ConvLayer regularConv;
   ConvLayer gpoolConv;
   BatchNormLayer gpoolBN;
-  ActivationLayer gpoolActivation;
   MatMulLayer gpoolToBiasMul;
   BatchNormLayer midBN;
-  ActivationLayer midActivation;
   ConvLayer finalConv;
 
   int nnXLen;
@@ -1227,14 +1345,11 @@ struct GlobalPoolingResidualBlock {
     int nnX, int nnY
   ): name(desc->name),
      preBN(handle,&desc->preBN,nnX,nnY),
-     preActivation(handle,&desc->preActivation),
      regularConv(handle,&desc->regularConv,nnX,nnY),
      gpoolConv(handle,&desc->gpoolConv,nnX,nnY),
      gpoolBN(handle,&desc->gpoolBN,nnX,nnY),
-     gpoolActivation(handle,&desc->gpoolActivation),
      gpoolToBiasMul(handle,&desc->gpoolToBiasMul),
      midBN(handle,&desc->midBN,nnX,nnY),
-     midActivation(handle,&desc->midActivation),
      finalConv(handle,&desc->finalConv,nnX,nnY),
      nnXLen(nnX),
      nnYLen(nnY),
@@ -1247,11 +1362,11 @@ struct GlobalPoolingResidualBlock {
   ~GlobalPoolingResidualBlock() {
   }
 
-  size_t requiredConvWorkspaceElts(size_t maxBatchSize) const {
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle, size_t maxBatchSize) const {
     size_t maxElts = 0;
-    maxElts = std::max(maxElts,regularConv.requiredConvWorkspaceElts(maxBatchSize));
-    maxElts = std::max(maxElts,gpoolConv.requiredConvWorkspaceElts(maxBatchSize));
-    maxElts = std::max(maxElts,finalConv.requiredConvWorkspaceElts(maxBatchSize));
+    maxElts = std::max(maxElts,regularConv.requiredConvWorkspaceElts(handle,maxBatchSize));
+    maxElts = std::max(maxElts,gpoolConv.requiredConvWorkspaceElts(handle,maxBatchSize));
+    maxElts = std::max(maxElts,finalConv.requiredConvWorkspaceElts(handle,maxBatchSize));
     return maxElts;
   }
 
@@ -1271,6 +1386,7 @@ struct GlobalPoolingResidualBlock {
     cl_mem convWorkspace,
     cl_mem convWorkspace2
   ) {
+    (void)midScratch;
     preBN.apply(handle,batchSize,true,trunk,trunkScratch,mask);
     regularConv.apply(handle,batchSize,trunkScratch,mid,convWorkspace,convWorkspace2);
     gpoolConv.apply(handle,batchSize,trunkScratch,gpoolOut,convWorkspace,convWorkspace2);
@@ -1287,9 +1403,12 @@ struct GlobalPoolingResidualBlock {
     // for(int i = 0; i<tmp.size(); i++)
     //   cout << tmp[i] << endl;
 
-    midBN.apply(handle,batchSize,true,mid,midScratch,mask);
-    finalConv.apply(handle,batchSize,midScratch,trunkScratch,convWorkspace,convWorkspace2);
-
+    if((finalConv.convXSize == 3 && finalConv.convYSize == 3) || (finalConv.convXSize == 5 && finalConv.convYSize == 5))
+      finalConv.applyWithBNRelu(handle,&midBN,batchSize,mid,trunkScratch,mask,convWorkspace,convWorkspace2);
+    else {
+      midBN.apply(handle,batchSize,true,mid,midScratch,mask);
+      finalConv.apply(handle,batchSize,midScratch,trunkScratch,convWorkspace,convWorkspace2);
+    }
     addPointWise(handle, trunk, trunkScratch, batchSize * finalConv.outChannels * nnYLen * nnXLen);
   }
 
@@ -1319,7 +1438,6 @@ struct Trunk {
   MatMulLayer* initialMatMul;
   vector<pair<int,void*>> blocks;
   BatchNormLayer* trunkTipBN;
-  ActivationLayer* trunkTipActivation;
 
   Trunk() = delete;
   Trunk(const Trunk&) = delete;
@@ -1355,7 +1473,6 @@ struct Trunk {
     initialMatMul = new MatMulLayer(handle,&desc->initialMatMul);
 
     trunkTipBN = new BatchNormLayer(handle,&desc->trunkTipBN,nnXLen,nnYLen);
-    trunkTipActivation = new ActivationLayer(handle,&desc->trunkTipActivation);
 
     assert(desc->blocks.size() == numBlocks);
     for(int i = 0; i<numBlocks; i++) {
@@ -1407,23 +1524,22 @@ struct Trunk {
     delete initialConv;
     delete initialMatMul;
     delete trunkTipBN;
-    delete trunkTipActivation;
   }
 
-  size_t requiredConvWorkspaceElts() const {
-    size_t maxElts = initialConv->requiredConvWorkspaceElts(maxBatchSize);
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle) const {
+    size_t maxElts = initialConv->requiredConvWorkspaceElts(handle,maxBatchSize);
 
     for(int i = 0; i<blocks.size(); i++) {
       if(blocks[i].first == ORDINARY_BLOCK_KIND) {
         ResidualBlock* block = (ResidualBlock*)blocks[i].second;
-        maxElts = std::max(maxElts,block->requiredConvWorkspaceElts(maxBatchSize));
+        maxElts = std::max(maxElts,block->requiredConvWorkspaceElts(handle,maxBatchSize));
       }
       else if(blocks[i].first == DILATED_BLOCK_KIND) {
         ASSERT_UNREACHABLE;
       }
       else if(blocks[i].first == GLOBAL_POOLING_BLOCK_KIND) {
         GlobalPoolingResidualBlock* block = (GlobalPoolingResidualBlock*)blocks[i].second;
-        maxElts = std::max(maxElts,block->requiredConvWorkspaceElts(maxBatchSize));
+        maxElts = std::max(maxElts,block->requiredConvWorkspaceElts(handle,maxBatchSize));
       }
       else {
         ASSERT_UNREACHABLE;
@@ -1537,10 +1653,8 @@ struct PolicyHead {
   ConvLayer* p1Conv;
   ConvLayer* g1Conv;
   BatchNormLayer* g1BN;
-  ActivationLayer* g1Activation;
   MatMulLayer* gpoolToBiasMul;
   BatchNormLayer* p1BN;
-  ActivationLayer* p1Activation;
   ConvLayer* p2Conv;
   MatMulLayer* gpoolToPassMul;
 
@@ -1565,10 +1679,8 @@ struct PolicyHead {
     p1Conv = new ConvLayer(handle,&desc->p1Conv,nnXLen,nnYLen);
     g1Conv = new ConvLayer(handle,&desc->g1Conv,nnXLen,nnYLen);
     g1BN = new BatchNormLayer(handle,&desc->g1BN,nnXLen,nnYLen);
-    g1Activation = new ActivationLayer(handle,&desc->g1Activation);
     gpoolToBiasMul = new MatMulLayer(handle,&desc->gpoolToBiasMul);
     p1BN = new BatchNormLayer(handle,&desc->p1BN,nnXLen,nnYLen);
-    p1Activation = new ActivationLayer(handle,&desc->p1Activation);
     p2Conv = new ConvLayer(handle,&desc->p2Conv,nnXLen,nnYLen);
     gpoolToPassMul = new MatMulLayer(handle,&desc->gpoolToPassMul);
   }
@@ -1578,19 +1690,17 @@ struct PolicyHead {
     delete p1Conv;
     delete g1Conv;
     delete g1BN;
-    delete g1Activation;
     delete gpoolToBiasMul;
     delete p1BN;
-    delete p1Activation;
     delete p2Conv;
     delete gpoolToPassMul;
   }
 
-  size_t requiredConvWorkspaceElts(size_t maxBatchSize) const {
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle, size_t maxBatchSize) const {
     size_t maxElts = 0;
-    maxElts = std::max(maxElts,p1Conv->requiredConvWorkspaceElts(maxBatchSize));
-    maxElts = std::max(maxElts,g1Conv->requiredConvWorkspaceElts(maxBatchSize));
-    maxElts = std::max(maxElts,p2Conv->requiredConvWorkspaceElts(maxBatchSize));
+    maxElts = std::max(maxElts,p1Conv->requiredConvWorkspaceElts(handle,maxBatchSize));
+    maxElts = std::max(maxElts,g1Conv->requiredConvWorkspaceElts(handle,maxBatchSize));
+    maxElts = std::max(maxElts,p2Conv->requiredConvWorkspaceElts(handle,maxBatchSize));
     return maxElts;
   }
 
@@ -1670,10 +1780,8 @@ struct ValueHead {
 
   ConvLayer* v1Conv;
   BatchNormLayer* v1BN;
-  ActivationLayer* v1Activation;
   MatMulLayer* v2Mul;
   MatBiasLayer* v2Bias;
-  ActivationLayer* v2Activation;
   MatMulLayer* v3Mul;
   MatBiasLayer* v3Bias;
   MatMulLayer* sv3Mul;
@@ -1702,10 +1810,8 @@ struct ValueHead {
 
     v1Conv = new ConvLayer(handle,&desc->v1Conv,nnXLen,nnYLen);
     v1BN = new BatchNormLayer(handle,&desc->v1BN,nnXLen,nnYLen);
-    v1Activation = new ActivationLayer(handle,&desc->v1Activation);
     v2Mul = new MatMulLayer(handle,&desc->v2Mul);
     v2Bias = new MatBiasLayer(handle,&desc->v2Bias);
-    v2Activation = new ActivationLayer(handle,&desc->v2Activation);
     v3Mul = new MatMulLayer(handle,&desc->v3Mul);
     v3Bias = new MatBiasLayer(handle,&desc->v3Bias);
     sv3Mul = new MatMulLayer(handle,&desc->sv3Mul);
@@ -1717,10 +1823,8 @@ struct ValueHead {
   {
     delete v1Conv;
     delete v1BN;
-    delete v1Activation;
     delete v2Mul;
     delete v2Bias;
-    delete v2Activation;
     delete v3Mul;
     delete v3Bias;
     delete sv3Mul;
@@ -1728,10 +1832,10 @@ struct ValueHead {
     delete vOwnershipConv;
   }
 
-  size_t requiredConvWorkspaceElts(size_t maxBatchSize) const {
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle, size_t maxBatchSize) const {
     size_t maxElts = 0;
-    maxElts = std::max(maxElts,v1Conv->requiredConvWorkspaceElts(maxBatchSize));
-    maxElts = std::max(maxElts,vOwnershipConv->requiredConvWorkspaceElts(maxBatchSize));
+    maxElts = std::max(maxElts,v1Conv->requiredConvWorkspaceElts(handle,maxBatchSize));
+    maxElts = std::max(maxElts,vOwnershipConv->requiredConvWorkspaceElts(handle,maxBatchSize));
     return maxElts;
   }
 
@@ -1892,11 +1996,11 @@ struct Model {
   }
 
 
-  size_t requiredConvWorkspaceElts() const {
+  size_t requiredConvWorkspaceElts(ComputeHandleInternal* handle) const {
     size_t maxElts = 0;
-    maxElts = std::max(maxElts,trunk->requiredConvWorkspaceElts());
-    maxElts = std::max(maxElts,policyHead->requiredConvWorkspaceElts(maxBatchSize));
-    maxElts = std::max(maxElts,valueHead->requiredConvWorkspaceElts(maxBatchSize));
+    maxElts = std::max(maxElts,trunk->requiredConvWorkspaceElts(handle));
+    maxElts = std::max(maxElts,policyHead->requiredConvWorkspaceElts(handle,maxBatchSize));
+    maxElts = std::max(maxElts,valueHead->requiredConvWorkspaceElts(handle,maxBatchSize));
     return maxElts;
   }
 
@@ -2122,7 +2226,7 @@ struct Buffers {
     ownership = createReadWriteBuffer(handle, ownershipElts);
     ownershipScratch = createReadWriteBuffer(handle, ownershipElts);
 
-    size_t convWorkspaceElts = m.requiredConvWorkspaceElts();
+    size_t convWorkspaceElts = m.requiredConvWorkspaceElts(handle);
     convWorkspace = createReadWriteBuffer(handle, convWorkspaceElts);
     convWorkspace2 = createReadWriteBuffer(handle, convWorkspaceElts);
   }
@@ -2179,13 +2283,14 @@ struct ComputeHandle {
   int policySize;
 
   ComputeHandle(
-    ComputeContext* context, const LoadedModel* loadedModel, int maxBatchSize, int nnX, int nnY, int gpuIdx, bool inputsUseNHWC, bool useNHWC, bool useFP16
+    ComputeContext* context, const LoadedModel* loadedModel, int maxBatchSize, int gpuIdx, bool inputsUseNHWC
   ) {
-    handle = new ComputeHandleInternal(context, gpuIdx, inputsUseNHWC, useNHWC, useFP16);
-    model = new Model(handle, &(loadedModel->modelDesc), maxBatchSize, nnX, nnY);
+    nnXLen = context->nnXLen;
+    nnYLen = context->nnYLen;
+
+    handle = new ComputeHandleInternal(context, gpuIdx, inputsUseNHWC);
+    model = new Model(handle, &(loadedModel->modelDesc), maxBatchSize, nnXLen, nnYLen);
     buffers = new Buffers(handle, *model);
-    nnXLen = nnX;
-    nnYLen = nnY;
     policySize = NNPos::getPolicySize(nnXLen, nnYLen);
   }
 
@@ -2205,25 +2310,38 @@ ComputeHandle* NeuralNet::createComputeHandle(
   const LoadedModel* loadedModel,
   Logger* logger,
   int maxBatchSize,
-  int nnXLen,
-  int nnYLen,
   bool requireExactNNLen,
   bool inputsUseNHWC,
-  int gpuIdxForThisThread,
-  bool useFP16,
-  bool useNHWC
+  int gpuIdxForThisThread
 ) {
-  if(logger != NULL)
+  if(logger != NULL) {
     logger->write("OpenCL backend: Model version " + Global::intToString(loadedModel->modelDesc.version));
+    logger->write(
+      "OpenCL backend: Model name: " + loadedModel->modelDesc.name
+    );
+  }
 
   //Current implementation always tolerates excess nn len
   (void)requireExactNNLen;
 
-  return new ComputeHandle(context,loadedModel,maxBatchSize,nnXLen,nnYLen,gpuIdxForThisThread,inputsUseNHWC,useNHWC,useFP16);
+  return new ComputeHandle(context,loadedModel,maxBatchSize,gpuIdxForThisThread,inputsUseNHWC);
 }
 
 void NeuralNet::freeComputeHandle(ComputeHandle* handle) {
   delete handle;
+}
+
+//------------------------------------------------------------------------------
+
+void NeuralNet::printDevices() {
+  vector<DeviceInfo> devices = DeviceInfo::getAllDeviceInfosOnSystem(NULL);
+  for(int i = 0; i<devices.size(); i++) {
+    const DeviceInfo& device = devices[i];
+    string msg =
+      "Found OpenCL Device " + Global::intToString(device.gpuIdx) + ": " + device.name + " (" + device.vendor + ")" +
+      " (score " + Global::intToString(device.defaultDesirability) + ")";
+    cout << msg << endl;
+  }
 }
 
 //--------------------------------------------------------------
@@ -2590,8 +2708,8 @@ bool NeuralNet::testEvaluateConv(
   if(useNHWC != false)
     return false;
 
-  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger);
-  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useFP16, useNHWC, useNHWC);
+  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger, nnXLen, nnYLen, useFP16, useNHWC);
+  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useNHWC);
 
   ConvLayer* layer = new ConvLayer(handle, desc, nnXLen, nnYLen);
 
@@ -2603,7 +2721,7 @@ bool NeuralNet::testEvaluateConv(
 
   vector<float> inputTmp = inputBuffer;
   cl_mem input = createReadOnlyBuffer(handle,inputTmp);
-  size_t convWorkspaceElts = layer->requiredConvWorkspaceElts(batchSize);
+  size_t convWorkspaceElts = layer->requiredConvWorkspaceElts(handle,batchSize);
   cl_mem convWorkspace = createReadWriteBuffer(handle, convWorkspaceElts);
   cl_mem convWorkspace2 = createReadWriteBuffer(handle, convWorkspaceElts);
 
@@ -2645,8 +2763,8 @@ bool NeuralNet::testEvaluateBatchNorm(
   if(useNHWC != false)
     return false;
 
-  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger);
-  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useFP16, useNHWC, useNHWC);
+  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger, nnXLen, nnYLen, useFP16, useNHWC);
+  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useNHWC);
 
   BatchNormLayer* layer = new BatchNormLayer(handle, desc, nnXLen, nnYLen);
 
@@ -2697,8 +2815,8 @@ bool NeuralNet::testEvaluateResidualBlock(
   if(useNHWC != false)
     return false;
 
-  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger);
-  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useFP16, useNHWC, useNHWC);
+  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger, nnXLen, nnYLen, useFP16, useNHWC);
+  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useNHWC);
 
   ResidualBlock* layer = new ResidualBlock(handle, desc, nnXLen, nnYLen);
 
@@ -2719,7 +2837,7 @@ bool NeuralNet::testEvaluateResidualBlock(
   cl_mem mid = createReadWriteBuffer(handle,numMidFloats);
   cl_mem midScratch = createReadWriteBuffer(handle,numMidFloats);
 
-  size_t convWorkspaceElts = layer->requiredConvWorkspaceElts(batchSize);
+  size_t convWorkspaceElts = layer->requiredConvWorkspaceElts(handle,batchSize);
   cl_mem convWorkspace = createReadWriteBuffer(handle, convWorkspaceElts);
   cl_mem convWorkspace2 = createReadWriteBuffer(handle, convWorkspaceElts);
 
@@ -2760,8 +2878,8 @@ bool NeuralNet::testEvaluateGlobalPoolingResidualBlock(
   if(useNHWC != false)
     return false;
 
-  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger);
-  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useFP16, useNHWC, useNHWC);
+  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger, nnXLen, nnYLen, useFP16, useNHWC);
+  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useNHWC);
 
   GlobalPoolingResidualBlock* layer = new GlobalPoolingResidualBlock(handle, desc, nnXLen, nnYLen);
 
@@ -2792,7 +2910,7 @@ bool NeuralNet::testEvaluateGlobalPoolingResidualBlock(
   cl_mem gpoolConcat = createReadWriteBuffer(handle,numGPoolConcatFloats);
   cl_mem gpoolBias = createReadWriteBuffer(handle,numGPoolBiasFloats);
 
-  size_t convWorkspaceElts = layer->requiredConvWorkspaceElts(batchSize);
+  size_t convWorkspaceElts = layer->requiredConvWorkspaceElts(handle,batchSize);
   cl_mem convWorkspace = createReadWriteBuffer(handle, convWorkspaceElts);
   cl_mem convWorkspace2 = createReadWriteBuffer(handle, convWorkspaceElts);
 
@@ -2855,8 +2973,8 @@ bool NeuralNet::testEvaluateSymmetry(
   if(useNHWC != false)
     return false;
 
-  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger);
-  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useFP16, useNHWC, useNHWC);
+  ComputeContext* context = createComputeContextForTesting({gpuIdx}, logger, nnXLen, nnYLen, useFP16, useNHWC);
+  ComputeHandleInternal* handle = new ComputeHandleInternal(context, gpuIdx, useNHWC);
 
   size_t numFloats = (size_t)batchSize * nnXLen * nnYLen * numChannels;
   if(numFloats != inputBuffer.size())

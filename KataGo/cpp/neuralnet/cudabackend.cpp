@@ -8,7 +8,11 @@
 #include "../neuralnet/nninputs.h"
 #include "../neuralnet/desc.h"
 
+#include "../external/half-2.1.0/include/half.hpp"
+
 using namespace std;
+
+using half_t = half_float::half;
 
 //Define this to print out some of the intermediate values of the neural net
 //#define DEBUG_INTERMEDIATE_VALUES
@@ -68,15 +72,11 @@ static void mallocAndCopyToDevice(const string& name, const vector<float>& weigh
   size_t numWeights = weights.size();
   if(useFP16) {
     size_t halfBytes = numWeights * sizeof(half);
-    size_t floatBytes = numWeights * sizeof(float);
-    float* buf;
+    vector<half_t> weightsHalf(weights.size());
+    for(size_t i = 0; i<weights.size(); i++)
+      weightsHalf[i] = half_float::half_cast<half_t>(weights[i]);
     CUDA_ERR(name.c_str(),cudaMalloc(&deviceBuf, halfBytes));
-    CUDA_ERR(name.c_str(),cudaMalloc(&buf, floatBytes));
-    CUDA_ERR(name.c_str(),cudaMemcpy(buf, weights.data(), floatBytes, cudaMemcpyHostToDevice));
-    customCudaCopyToHalf(buf,(half*)deviceBuf,numWeights);
-    CUDA_ERR(name.c_str(),cudaPeekAtLastError());
-    CUDA_ERR(name.c_str(),cudaDeviceSynchronize());
-    cudaFree(buf);
+    CUDA_ERR(name.c_str(),cudaMemcpy(deviceBuf, weightsHalf.data(), halfBytes, cudaMemcpyHostToDevice));
   }
   else {
     size_t floatBytes = numWeights * sizeof(float);
@@ -88,15 +88,11 @@ static void mallocAndCopyToDevice(const string& name, const vector<float>& weigh
 static void mallocAndCopyToDevice(const string& name, const float* weights, int numWeights, void*& deviceBuf, bool useFP16) {
   if(useFP16) {
     size_t halfBytes = numWeights * sizeof(half);
-    size_t floatBytes = numWeights * sizeof(float);
-    float* buf;
+    vector<half_t> weightsHalf(numWeights);
+    for(int i = 0; i<numWeights; i++)
+      weightsHalf[i] = half_float::half_cast<half_t>(weights[i]);
     CUDA_ERR(name.c_str(),cudaMalloc(&deviceBuf, halfBytes));
-    CUDA_ERR(name.c_str(),cudaMalloc(&buf, floatBytes));
-    CUDA_ERR(name.c_str(),cudaMemcpy(buf, weights, floatBytes, cudaMemcpyHostToDevice));
-    customCudaCopyToHalf(buf,(half*)deviceBuf,numWeights);
-    CUDA_ERR(name.c_str(),cudaPeekAtLastError());
-    CUDA_ERR(name.c_str(),cudaDeviceSynchronize());
-    cudaFree(buf);
+    CUDA_ERR(name.c_str(),cudaMemcpy(deviceBuf, weightsHalf.data(), halfBytes, cudaMemcpyHostToDevice));
   }
   else {
     size_t floatBytes = numWeights * sizeof(float);
@@ -108,14 +104,11 @@ static void mallocAndCopyToDevice(const string& name, const float* weights, int 
 //Only use in testing, allocates an intermediate buffer in the case of FP16 which will be very slow.
 static void expensiveCopyFromDevice(const string& name, float* weights, int numWeights, const void* deviceBuf, bool useFP16) {
   if(useFP16) {
-    size_t floatBytes = numWeights * sizeof(float);
-    float* buf;
-    CUDA_ERR(name.c_str(),cudaMalloc(&buf, floatBytes));
-    customCudaCopyFromHalf((const half*)deviceBuf,(float*)buf,numWeights);
-    CUDA_ERR(name.c_str(),cudaMemcpy(weights, buf, floatBytes, cudaMemcpyDeviceToHost));
-    CUDA_ERR(name.c_str(),cudaPeekAtLastError());
-    CUDA_ERR(name.c_str(),cudaDeviceSynchronize());
-    cudaFree(buf);
+    vector<half_t> weightsHalf(numWeights);
+    size_t halfBytes = numWeights * sizeof(half);
+    CUDA_ERR(name.c_str(),cudaMemcpy(weightsHalf.data(), deviceBuf, halfBytes, cudaMemcpyDeviceToHost));
+    for(int i = 0; i<numWeights; i++)
+      weights[i] = weightsHalf[i];
   }
   else {
     size_t floatBytes = numWeights * sizeof(float);
@@ -2398,14 +2391,17 @@ struct LoadedModel {
   LoadedModel& operator=(const LoadedModel&) = delete;
 };
 
-LoadedModel* NeuralNet::loadModelFile(const string& file, int modelFileIdx) {
-  (void)modelFileIdx;
+LoadedModel* NeuralNet::loadModelFile(const string& file) {
   LoadedModel* loadedModel = new LoadedModel(file);
   return loadedModel;
 }
 
 void NeuralNet::freeLoadedModel(LoadedModel* loadedModel) {
   delete loadedModel;
+}
+
+string NeuralNet::getModelName(const LoadedModel* loadedModel) {
+  return loadedModel->modelDesc.name;
 }
 
 int NeuralNet::getModelVersion(const LoadedModel* loadedModel) {
@@ -2611,7 +2607,13 @@ struct Buffers {
 
 //------------------------------------------------------------------------------
 
-//Cuda implementation doesn't need this
+struct ComputeContext {
+  int nnXLen;
+  int nnYLen;
+  enabled_t useFP16Mode;
+  enabled_t useNHWCMode;
+};
+
 ComputeContext* NeuralNet::createComputeContext(
   const std::vector<int>& gpuIdxs,
   Logger* logger,
@@ -2619,22 +2621,27 @@ ComputeContext* NeuralNet::createComputeContext(
   int nnYLen,
   string openCLTunerFile,
   bool openCLReTunePerBoardSize,
+  enabled_t useFP16Mode,
+  enabled_t useNHWCMode,
   const LoadedModel* loadedModel
 ) {
   (void)gpuIdxs;
   (void)logger;
-  (void)nnXLen;
-  (void)nnYLen;
   (void)openCLTunerFile;
   (void)openCLReTunePerBoardSize;
   (void)loadedModel;
-  return NULL;
+
+  ComputeContext* context = new ComputeContext();
+  context->nnXLen = nnXLen;
+  context->nnYLen = nnYLen;
+  context->useFP16Mode = useFP16Mode;
+  context->useNHWCMode = useNHWCMode;
+  return context;
 }
 
 void NeuralNet::freeComputeContext(ComputeContext* computeContext) {
-  assert(computeContext == NULL);
+  delete computeContext;
 }
-
 
 //------------------------------------------------------------------------------
 
@@ -2691,16 +2698,10 @@ ComputeHandle* NeuralNet::createComputeHandle(
   const LoadedModel* loadedModel,
   Logger* logger,
   int maxBatchSize,
-  int nnXLen,
-  int nnYLen,
   bool requireExactNNLen,
   bool inputsUseNHWC,
-  int gpuIdxForThisThread,
-  bool useFP16,
-  bool useNHWC
+  int gpuIdxForThisThread
 ) {
-  (void)context;
-
   //Use whatever CUDA believes GPU 0 to be.
   if(gpuIdxForThisThread == -1)
     gpuIdxForThisThread = 0;
@@ -2709,6 +2710,42 @@ ComputeHandle* NeuralNet::createComputeHandle(
 
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop,gpuIdxForThisThread);
+
+  bool useFP16 = false;
+  bool useNHWC = false;
+  //Old GPUs - use FP32 and explicitly fail if FP16 enabled
+  if(prop.major < 5 || (prop.major == 5 && prop.minor < 3)) {
+    if(context->useFP16Mode == enabled_t::True)
+      throw StringError("Cuda device versions below 5.3 do not support useFP16=true");
+    if(context->useNHWCMode == enabled_t::True)
+      useNHWC = true;
+  }
+  //In theory these GPUs support FP16, so allow if the user wants.
+  else if(prop.major < 6) {
+    if(context->useFP16Mode == enabled_t::True)
+      useFP16 = true;
+    if(context->useNHWCMode == enabled_t::True)
+      useNHWC = true;
+  }
+  //On Pascal architecture, default to using FP16 operations
+  //Actually, just use FP32 - there's a risk that on certain cards this might just be a lot worse.
+  //A user manually fine-tuning for performance can just enable it themselves if they know how.
+  else if(prop.major < 7) {
+    if(context->useFP16Mode == enabled_t::True)
+      useFP16 = true;
+    if(context->useNHWCMode == enabled_t::True)
+      useNHWC = true;
+  }
+  //On Volta and higher, use FP16 and NHWC together because we have tensor cores.
+  else {
+    if(context->useFP16Mode == enabled_t::True || context->useFP16Mode == enabled_t::Auto)
+      useFP16 = true;
+    if(context->useNHWCMode == enabled_t::True || (context->useNHWCMode == enabled_t::Auto && useFP16))
+      useNHWC = true;
+  }
+  int nnXLen = context->nnXLen;
+  int nnYLen = context->nnYLen;
+
   if(logger != NULL) {
     logger->write(
       "Cuda backend: Found GPU " + string(prop.name)
@@ -2716,10 +2753,15 @@ ComputeHandle* NeuralNet::createComputeHandle(
       + " compute capability major " + Global::intToString(prop.major)
       + " minor " + Global::intToString(prop.minor)
     );
-    logger->write("Cuda backend: Model version " + Global::intToString(loadedModel->modelDesc.version));
+    logger->write(
+      "Cuda backend: Model version " + Global::intToString(loadedModel->modelDesc.version) +
+      " useFP16 = " + Global::boolToString(useFP16) +
+      " useNHWC = " + Global::boolToString(useNHWC)
+    );
+    logger->write(
+      "Cuda backend: Model name: " + loadedModel->modelDesc.name
+    );
   }
-  if(useFP16 && (prop.major < 5 || (prop.major == 5 && prop.minor < 3)))
-    throw StringError("Cuda device versions below 5.3 do not support useFP16=true");
 
   ComputeHandle* gpuHandle = new ComputeHandle(
     loadedModel,prop.major,prop.minor,maxBatchSize,nnXLen,nnYLen,requireExactNNLen,inputsUseNHWC,useFP16,useNHWC
@@ -2730,6 +2772,19 @@ ComputeHandle* NeuralNet::createComputeHandle(
 void NeuralNet::freeComputeHandle(ComputeHandle* gpuHandle) {
   delete gpuHandle;
 }
+
+//------------------------------------------------------------------------------
+
+void NeuralNet::printDevices() {
+  int numDevices = 0;
+  cudaGetDeviceCount(&numDevices);
+  for(int i = 0; i<numDevices; i++) {
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, i);
+    cout << "Found CUDA device " << i << ": " << prop.name << endl;
+  }
+}
+
 
 //------------------------------------------------------------------------------
 

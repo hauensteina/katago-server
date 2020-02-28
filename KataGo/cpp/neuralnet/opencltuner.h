@@ -20,12 +20,37 @@ struct OpenCLTuneParams {
     int VWND = 1;
     int PADA = 1;
     int PADB = 1;
+
     std::string desc() const;
     std::string compileOptions() const;
     void fillFromDesc(const std::string& fileName, const std::string& desc);
     bool isValid() const;
   };
   XGemmDirectParams xGemmDirect = XGemmDirectParams();
+
+  struct XGemmParams {
+    int MWG = 8;
+    int NWG = 8;
+    int KWG = 8;
+    int MDIMC = 1;
+    int NDIMC = 1;
+    int MDIMA = 1;
+    int NDIMB = 1;
+    int KWI = 1;
+    int VWM = 1;
+    int VWN = 1;
+    int STRM = 0;
+    int STRN = 0;
+    int SA = 0;
+    int SB = 0;
+
+    std::string desc() const;
+    std::string compileOptions() const;
+    void fillFromDesc(const std::string& fileName, const std::string& desc);
+    bool isValid() const;
+    bool isSimple() const;
+  };
+  XGemmParams xGemm = XGemmParams();
 
   struct Conv3x3Params {
     //Winograd input and output tile sizes
@@ -36,7 +61,6 @@ struct OpenCLTuneParams {
 
     int transLocalSize0 = 1;
     int transLocalSize1 = 1;
-    int transLocalSize2 = 1;
 
     int untransLocalSize0 = 1;
     int untransLocalSize1 = 1;
@@ -60,7 +84,6 @@ struct OpenCLTuneParams {
 
     int transLocalSize0 = 1;
     int transLocalSize1 = 1;
-    int transLocalSize2 = 1;
 
     int untransLocalSize0 = 1;
     int untransLocalSize1 = 1;

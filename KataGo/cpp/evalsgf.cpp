@@ -4,6 +4,7 @@
 #include "dataio/sgf.h"
 #include "search/asyncbot.h"
 #include "program/setup.h"
+#include "program/playutils.h"
 #include "program/play.h"
 #include "main.h"
 
@@ -201,9 +202,11 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
   {
     Setup::initializeSession(cfg);
     int maxConcurrentEvals = params.numThreads * 2 + 16; // * 2 + 16 just to give plenty of headroom
+    int defaultMaxBatchSize = std::max(8,((params.numThreads+3)/4)*4);
     nnEval = Setup::initializeNNEvaluator(
       modelFile,modelFile,cfg,logger,seedRand,maxConcurrentEvals,
-      board.x_size,board.y_size
+      board.x_size,board.y_size,defaultMaxBatchSize,
+      Setup::SETUP_FOR_GTP
     );
   }
   logger.write("Loaded neural net");
@@ -227,7 +230,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
     bool includeOwnerMap = true;
     MiscNNInputParams nnInputParams;
     nnInputParams.drawEquivalentWinsForWhite = params.drawEquivalentWinsForWhite;
-    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,NULL,skipCache,includeOwnerMap);
+    nnEval->evaluate(board,hist,nextPla,nnInputParams,buf,skipCache,includeOwnerMap);
 
     cout << "Rules: " << hist.rules << endl;
     cout << "Encore phase " << hist.encorePhase << endl;
@@ -241,7 +244,7 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
   bot->setPosition(nextPla,board,hist);
 
   //Print initial state----------------------------------------------------------------
-  Search* search = bot->getSearch();
+  const Search* search = bot->getSearchStopAndWait();
   ostringstream sout;
   sout << "Rules: " << hist.rules << endl;
   sout << "Encore phase " << hist.encorePhase << endl;
@@ -354,8 +357,8 @@ int MainCmds::evalsgf(int argc, const char* const* argv) {
 
   if(printLead) {
     BoardHistory hist2(hist);
-    double lead = Play::computeLead(
-      bot->getSearch(), bot->getSearch(), board, hist2, nextPla,
+    double lead = PlayUtils::computeLead(
+      bot->getSearchStopAndWait(), NULL, board, hist2, nextPla,
       20, logger, OtherGameProperties()
     );
     cout << "LEAD: " << lead << endl;

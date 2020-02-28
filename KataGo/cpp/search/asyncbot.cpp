@@ -54,7 +54,8 @@ Player AsyncBot::getRootPla() const {
   return search->rootPla;
 }
 
-Search* AsyncBot::getSearch() {
+Search* AsyncBot::getSearchStopAndWait() {
+  stopAndWait();
   return search;
 }
 const Search* AsyncBot::getSearch() const {
@@ -67,10 +68,6 @@ SearchParams AsyncBot::getParams() const {
 void AsyncBot::setPosition(Player pla, const Board& board, const BoardHistory& history) {
   stopAndWait();
   search->setPosition(pla,board,history);
-}
-void AsyncBot::setRulesAndClearHistory(Rules rules, int encorePhase) {
-  stopAndWait();
-  search->setRulesAndClearHistory(rules,encorePhase);
 }
 void AsyncBot::setKomiIfNew(float newKomi) {
   stopAndWait();

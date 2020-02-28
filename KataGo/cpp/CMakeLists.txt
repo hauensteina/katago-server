@@ -224,15 +224,19 @@ if(BUILD_MCTS)
     search/asyncbot.cpp
     search/distributiontable.cpp
     search/analysisdata.cpp
+    program/gtpconfig.cpp
     program/setup.cpp
+    program/playutils.cpp
     program/play.cpp
     ${GIT_HEADER_FILE_ALWAYS_UPDATED}
     tests/testboardarea.cpp
     tests/testboardbasic.cpp
+    tests/testcommon.cpp
     tests/testrules.cpp
     tests/testscore.cpp
     tests/testsgf.cpp
     tests/testnninputs.cpp
+    tests/testownership.cpp
     tests/testsearch.cpp
     tests/testtime.cpp
     tests/testtrainingwrite.cpp

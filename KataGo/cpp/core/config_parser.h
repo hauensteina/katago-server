@@ -5,6 +5,7 @@
 
 #include "../core/global.h"
 #include "../core/logger.h"
+#include "../core/commontypes.h"
 
 /* Parses simple configs like:
 
@@ -18,11 +19,17 @@ baz = yay
 class ConfigParser {
  public:
   ConfigParser(const std::string& file);
+  ConfigParser(std::istream& in);
   ConfigParser(const std::map<std::string, std::string>& kvs);
   ~ConfigParser();
 
   ConfigParser(const ConfigParser& other) = delete;
   ConfigParser& operator=(const ConfigParser& other) = delete;
+
+  void overrideKeys(const std::map<std::string, std::string>& newkvs);
+  //mutexKeySets: For each pair of sets (A,B), if newkvs contains anything in A, erase every existing key that overlaps with B, and vice versa.
+  void overrideKeys(const std::map<std::string, std::string>& newkvs, const std::vector<std::pair<std::set<std::string>,std::set<std::string>>>& mutexKeySets);
+  static std::map<std::string,std::string> parseCommaSeparated(const std::string& commaSeparatedValues);
 
   void warnUnusedKeys(std::ostream& out, Logger* logger) const;
   void markAllKeysUsedWithPrefix(const std::string& prefix);
@@ -35,6 +42,7 @@ class ConfigParser {
 
   std::string getString(const std::string& key);
   bool getBool(const std::string& key);
+  enabled_t getEnabled(const std::string& key);
   int getInt(const std::string& key);
   int64_t getInt64(const std::string& key);
   uint64_t getUInt64(const std::string& key);
@@ -70,6 +78,8 @@ class ConfigParser {
 
   mutable std::mutex usedKeysMutex;
   std::set<std::string> usedKeys;
+
+  void initialize(std::istream& in);
 };
 
 

@@ -48,10 +48,10 @@ RM = /home/ahauenst/miniconda/bin/cmake -E remove -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/ahauenst/katago-server/KataGo/cpp
+CMAKE_SOURCE_DIR = /large/KataGo/cpp
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/ahauenst/katago-server/KataGo/cpp
+CMAKE_BINARY_DIR = /large/KataGo/cpp
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -80,9 +80,9 @@ edit_cache/fast: edit_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ahauenst/katago-server/KataGo/cpp/CMakeFiles /home/ahauenst/katago-server/KataGo/cpp/CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /large/KataGo/cpp/CMakeFiles /large/KataGo/cpp/CMakeFiles/progress.marks
 	$(MAKE) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ahauenst/katago-server/KataGo/cpp/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /large/KataGo/cpp/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -1257,6 +1257,33 @@ neuralnet/nninputs.cpp.s:
 	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/neuralnet/nninputs.cpp.s
 .PHONY : neuralnet/nninputs.cpp.s
 
+program/gtpconfig.o: program/gtpconfig.cpp.o
+
+.PHONY : program/gtpconfig.o
+
+# target to build an object file
+program/gtpconfig.cpp.o:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/gtpconfig.cpp.o
+.PHONY : program/gtpconfig.cpp.o
+
+program/gtpconfig.i: program/gtpconfig.cpp.i
+
+.PHONY : program/gtpconfig.i
+
+# target to preprocess a source file
+program/gtpconfig.cpp.i:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/gtpconfig.cpp.i
+.PHONY : program/gtpconfig.cpp.i
+
+program/gtpconfig.s: program/gtpconfig.cpp.s
+
+.PHONY : program/gtpconfig.s
+
+# target to generate assembly for a file
+program/gtpconfig.cpp.s:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/gtpconfig.cpp.s
+.PHONY : program/gtpconfig.cpp.s
+
 program/play.o: program/play.cpp.o
 
 .PHONY : program/play.o
@@ -1283,6 +1310,33 @@ program/play.s: program/play.cpp.s
 program/play.cpp.s:
 	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/play.cpp.s
 .PHONY : program/play.cpp.s
+
+program/playutils.o: program/playutils.cpp.o
+
+.PHONY : program/playutils.o
+
+# target to build an object file
+program/playutils.cpp.o:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/playutils.cpp.o
+.PHONY : program/playutils.cpp.o
+
+program/playutils.i: program/playutils.cpp.i
+
+.PHONY : program/playutils.i
+
+# target to preprocess a source file
+program/playutils.cpp.i:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/playutils.cpp.i
+.PHONY : program/playutils.cpp.i
+
+program/playutils.s: program/playutils.cpp.s
+
+.PHONY : program/playutils.s
+
+# target to generate assembly for a file
+program/playutils.cpp.s:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/program/playutils.cpp.s
+.PHONY : program/playutils.cpp.s
 
 program/setup.o: program/setup.cpp.o
 
@@ -1662,6 +1716,33 @@ tests/testboardbasic.cpp.s:
 	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testboardbasic.cpp.s
 .PHONY : tests/testboardbasic.cpp.s
 
+tests/testcommon.o: tests/testcommon.cpp.o
+
+.PHONY : tests/testcommon.o
+
+# target to build an object file
+tests/testcommon.cpp.o:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testcommon.cpp.o
+.PHONY : tests/testcommon.cpp.o
+
+tests/testcommon.i: tests/testcommon.cpp.i
+
+.PHONY : tests/testcommon.i
+
+# target to preprocess a source file
+tests/testcommon.cpp.i:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testcommon.cpp.i
+.PHONY : tests/testcommon.cpp.i
+
+tests/testcommon.s: tests/testcommon.cpp.s
+
+.PHONY : tests/testcommon.s
+
+# target to generate assembly for a file
+tests/testcommon.cpp.s:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testcommon.cpp.s
+.PHONY : tests/testcommon.cpp.s
+
 tests/testnn.o: tests/testnn.cpp.o
 
 .PHONY : tests/testnn.o
@@ -1715,6 +1796,33 @@ tests/testnninputs.s: tests/testnninputs.cpp.s
 tests/testnninputs.cpp.s:
 	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testnninputs.cpp.s
 .PHONY : tests/testnninputs.cpp.s
+
+tests/testownership.o: tests/testownership.cpp.o
+
+.PHONY : tests/testownership.o
+
+# target to build an object file
+tests/testownership.cpp.o:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testownership.cpp.o
+.PHONY : tests/testownership.cpp.o
+
+tests/testownership.i: tests/testownership.cpp.i
+
+.PHONY : tests/testownership.i
+
+# target to preprocess a source file
+tests/testownership.cpp.i:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testownership.cpp.i
+.PHONY : tests/testownership.cpp.i
+
+tests/testownership.s: tests/testownership.cpp.s
+
+.PHONY : tests/testownership.s
+
+# target to generate assembly for a file
+tests/testownership.cpp.s:
+	$(MAKE) -f CMakeFiles/katago.dir/build.make CMakeFiles/katago.dir/tests/testownership.cpp.s
+.PHONY : tests/testownership.cpp.s
 
 tests/testrules.o: tests/testrules.cpp.o
 
@@ -2040,9 +2148,15 @@ help:
 	@echo "... neuralnet/nninputs.o"
 	@echo "... neuralnet/nninputs.i"
 	@echo "... neuralnet/nninputs.s"
+	@echo "... program/gtpconfig.o"
+	@echo "... program/gtpconfig.i"
+	@echo "... program/gtpconfig.s"
 	@echo "... program/play.o"
 	@echo "... program/play.i"
 	@echo "... program/play.s"
+	@echo "... program/playutils.o"
+	@echo "... program/playutils.i"
+	@echo "... program/playutils.s"
 	@echo "... program/setup.o"
 	@echo "... program/setup.i"
 	@echo "... program/setup.s"
@@ -2085,12 +2199,18 @@ help:
 	@echo "... tests/testboardbasic.o"
 	@echo "... tests/testboardbasic.i"
 	@echo "... tests/testboardbasic.s"
+	@echo "... tests/testcommon.o"
+	@echo "... tests/testcommon.i"
+	@echo "... tests/testcommon.s"
 	@echo "... tests/testnn.o"
 	@echo "... tests/testnn.i"
 	@echo "... tests/testnn.s"
 	@echo "... tests/testnninputs.o"
 	@echo "... tests/testnninputs.i"
 	@echo "... tests/testnninputs.s"
+	@echo "... tests/testownership.o"
+	@echo "... tests/testownership.i"
+	@echo "... tests/testownership.s"
 	@echo "... tests/testrules.o"
 	@echo "... tests/testrules.i"
 	@echo "... tests/testrules.s"

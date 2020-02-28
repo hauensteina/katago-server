@@ -189,8 +189,8 @@ vector<DeviceInfo> DeviceInfo::getAllDeviceInfosOnSystem(Logger* logger) {
   assert(numPlatforms <= platformIds.size());
   platformIds.resize(numPlatforms);
 
-  constexpr int bufLen = 2048;
-  char buf[bufLen];
+  constexpr int bufLen = 16384;
+  vector<char> buf(bufLen);
   for(int i = 0; i<bufLen; i++)
     buf[i] = '\0';
 
@@ -199,32 +199,32 @@ vector<DeviceInfo> DeviceInfo::getAllDeviceInfosOnSystem(Logger* logger) {
   for(int platformIdx = 0; platformIdx < numPlatforms && numDevicesTotal < deviceIds.size(); platformIdx++) {
     size_t sizeRet;
 
-    err = clGetPlatformInfo(platformIds[platformIdx], CL_PLATFORM_NAME, bufLen, buf, &sizeRet);
+    err = clGetPlatformInfo(platformIds[platformIdx], CL_PLATFORM_NAME, bufLen, buf.data(), &sizeRet);
     assert(sizeRet < bufLen-1);
     CHECK_ERR(err);
-    string name = string(buf);
+    string name = string(buf.data());
 
-    err = clGetPlatformInfo(platformIds[platformIdx], CL_PLATFORM_VENDOR, bufLen, buf, &sizeRet);
+    err = clGetPlatformInfo(platformIds[platformIdx], CL_PLATFORM_VENDOR, bufLen, buf.data(), &sizeRet);
     assert(sizeRet < bufLen-1);
     CHECK_ERR(err);
-    string vendor = string(buf);
+    string vendor = string(buf.data());
 
-    err = clGetPlatformInfo(platformIds[platformIdx], CL_PLATFORM_VERSION, bufLen, buf, &sizeRet);
+    err = clGetPlatformInfo(platformIds[platformIdx], CL_PLATFORM_VERSION, bufLen, buf.data(), &sizeRet);
     assert(sizeRet < bufLen-1);
     CHECK_ERR(err);
-    string version = string(buf);
+    string version = string(buf.data());
 
     if(logger != NULL)
       logger->write("Found OpenCL Platform " + Global::intToString(platformIdx) + ": " + name + " (" + vendor + ") (" + version + ")");
 
     cl_uint numDevices;
     err = clGetDeviceIDs(
-      platformIds[platformIdx], CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR, deviceIds.size() - numDevicesTotal,
+      platformIds[platformIdx], CL_DEVICE_TYPE_CPU | CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR, deviceIds.size() - numDevicesTotal,
       deviceIds.data() + numDevicesTotal, &numDevices);
     //Allow there to be 0 devices on this platform, just move on to the next
     if(err == CL_DEVICE_NOT_FOUND) {
       if(logger != NULL)
-        logger->write("Found 0 device(s) on platform " + Global::intToString(platformIdx) + " with type GPU or Accelerator, skipping");
+        logger->write("Found 0 device(s) on platform " + Global::intToString(platformIdx) + " with type CPU or GPU or Accelerator, skipping");
       continue;
     }
 
@@ -232,7 +232,7 @@ vector<DeviceInfo> DeviceInfo::getAllDeviceInfosOnSystem(Logger* logger) {
     assert(numDevices <= deviceIds.size());
     numDevicesTotal += numDevices;
     if(logger != NULL)
-      logger->write("Found " + Global::intToString(numDevices) + " device(s) on platform " + Global::intToString(platformIdx) + " with type GPU or Accelerator");
+      logger->write("Found " + Global::intToString(numDevices) + " device(s) on platform " + Global::intToString(platformIdx) + " with type CPU or GPU or Accelerator");
   }
   deviceIds.resize(numDevicesTotal);
 
@@ -240,42 +240,48 @@ vector<DeviceInfo> DeviceInfo::getAllDeviceInfosOnSystem(Logger* logger) {
   for(int gpuIdx = 0; gpuIdx<numDevicesTotal; gpuIdx++) {
     size_t sizeRet;
 
-    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_NAME, bufLen, buf, &sizeRet);
+    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_NAME, bufLen, buf.data(), &sizeRet);
     assert(sizeRet < bufLen-1);
     CHECK_ERR(err);
-    string name = string(buf);
+    string name = string(buf.data());
 
-    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_VENDOR, bufLen, buf, &sizeRet);
+    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_VENDOR, bufLen, buf.data(), &sizeRet);
     assert(sizeRet < bufLen-1);
     CHECK_ERR(err);
-    string vendor = string(buf);
+    string vendor = string(buf.data());
 
     cl_device_type deviceType;
     err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_TYPE, sizeof(cl_device_type), &deviceType, &sizeRet);
     assert(sizeRet <= sizeof(cl_device_type));
     CHECK_ERR(err);
 
-    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_VERSION, bufLen, buf, &sizeRet);
+    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_VERSION, bufLen, buf.data(), &sizeRet);
     assert(sizeRet < bufLen-1);
     CHECK_ERR(err);
-    string openCLVersion = string(buf);
+    string openCLVersion = string(buf.data());
 
-    if(logger != NULL)
-      logger->write("Found OpenCL Device " + Global::intToString(gpuIdx) + ": " + name + " (" + vendor + ")");
+    err = clGetDeviceInfo(deviceIds[gpuIdx], CL_DEVICE_EXTENSIONS, bufLen, buf.data(), &sizeRet);
+    assert(sizeRet < bufLen-1);
+    CHECK_ERR(err);
+    string extensions = string(buf.data());
 
     int defaultDesirability = 0;
     //Compute desirability for this device for default device selection
     {
-      string lowercaseVendor = Global::toLower(vendor);
-      if(lowercaseVendor.find("advanced micro devices") != string::npos) defaultDesirability += 1000000;
-      else if(lowercaseVendor.find("amd") != string::npos) defaultDesirability += 1000000;
-      else if(lowercaseVendor.find("nvidia") != string::npos) defaultDesirability += 1000000;
-      else if(lowercaseVendor.find("intel") != string::npos) defaultDesirability += 500000;
+      //We should make sure CPUs don't get ranked above GPUs even if they have good vendor
+      bool isCPU = ((deviceType & CL_DEVICE_TYPE_CPU) != 0);
 
-      if(deviceType == CL_DEVICE_TYPE_GPU) defaultDesirability += 100000;
-      else if(deviceType == CL_DEVICE_TYPE_ACCELERATOR) defaultDesirability += 50000;
-      else if((deviceType & CL_DEVICE_TYPE_GPU) != 0) defaultDesirability += 20000;
-      else if(deviceType == CL_DEVICE_TYPE_DEFAULT) defaultDesirability += 10000;
+      string lowercaseVendor = Global::toLower(vendor);
+      if(lowercaseVendor.find("advanced micro devices") != string::npos && !isCPU) defaultDesirability += 10000000;
+      else if(lowercaseVendor.find("amd") != string::npos && !isCPU) defaultDesirability += 10000000;
+      else if(lowercaseVendor.find("nvidia") != string::npos && !isCPU) defaultDesirability += 10000000;
+      else if(lowercaseVendor.find("intel") != string::npos && !isCPU) defaultDesirability += 5000000;
+
+      if(deviceType == CL_DEVICE_TYPE_GPU) defaultDesirability += 1000000;
+      else if(deviceType == CL_DEVICE_TYPE_ACCELERATOR) defaultDesirability += 500000;
+      else if((deviceType & CL_DEVICE_TYPE_GPU) != 0) defaultDesirability += 200000;
+      else if((deviceType & CL_DEVICE_TYPE_ACCELERATOR) != 0) defaultDesirability += 100000;
+      else if(deviceType == CL_DEVICE_TYPE_DEFAULT) defaultDesirability += 50000;
 
       vector<string> versionPieces = Global::split(Global::trim(openCLVersion));
       if(versionPieces.size() >= 2) {
@@ -292,6 +298,9 @@ vector<DeviceInfo> DeviceInfo::getAllDeviceInfosOnSystem(Logger* logger) {
       }
     }
 
+    if(logger != NULL)
+      logger->write("Found OpenCL Device " + Global::intToString(gpuIdx) + ": " + name + " (" + vendor + ")" + " (score " + Global::intToString(defaultDesirability) + ")");
+
     DeviceInfo info;
     info.gpuIdx = gpuIdx;
     info.deviceId = deviceIds[gpuIdx];
@@ -299,6 +308,7 @@ vector<DeviceInfo> DeviceInfo::getAllDeviceInfosOnSystem(Logger* logger) {
     info.vendor = vendor;
     info.deviceType = deviceType;
     info.openCLVersion = openCLVersion;
+    info.extensions = extensions;
     info.defaultDesirability = defaultDesirability;
     allDeviceInfos.push_back(info);
   }
@@ -450,7 +460,7 @@ size_t OpenCLHelpers::roundUpToMultiple(size_t size, size_t ofThis) {
   return (size + ofThis - 1) / ofThis * ofThis;
 }
 
-cl_int OpenCLHelpers::doBatchedXGemm_KM_KN_MN(
+cl_int OpenCLHelpers::doBatchedXGemm_KM_KN_NM(
   cl_kernel kernel,
   cl_command_queue commandQueue,
   const OpenCLTuneParams& tuneParams,
@@ -459,7 +469,49 @@ cl_int OpenCLHelpers::doBatchedXGemm_KM_KN_MN(
   int numBatchElts,
   cl_event* eventBuf
 ) {
-  int cTranspose = 1;
+  clSetKernelArg(kernel, 0, sizeof(int), (void *)&M);
+  clSetKernelArg(kernel, 1, sizeof(int), (void *)&N);
+  clSetKernelArg(kernel, 2, sizeof(int), (void *)&K);
+  clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&A);
+  clSetKernelArg(kernel, 4, sizeof(int), (void *)&M);
+  clSetKernelArg(kernel, 5, sizeof(int), (void *)&K);
+  clSetKernelArg(kernel, 6, sizeof(cl_mem), (void *)&B);
+  clSetKernelArg(kernel, 7, sizeof(int), (void *)&N);
+  clSetKernelArg(kernel, 8, sizeof(int), (void *)&K);
+  clSetKernelArg(kernel, 9, sizeof(cl_mem), (void *)&C);
+  clSetKernelArg(kernel,10, sizeof(int), (void *)&M);
+  clSetKernelArg(kernel,11, sizeof(int), (void *)&N);
+
+  assert(M % tuneParams.xGemm.MWG == 0);
+  assert(N % tuneParams.xGemm.NWG == 0);
+  assert(K % tuneParams.xGemm.KWG == 0);
+
+  static constexpr int nKernelDims = 3;
+  const size_t MDIMC = tuneParams.xGemm.MDIMC;
+  const size_t NDIMC = tuneParams.xGemm.NDIMC;
+  const size_t MWG = tuneParams.xGemm.MWG;
+  const size_t NWG = tuneParams.xGemm.NWG;
+
+  size_t globalSizes[nKernelDims] = {M * MDIMC / MWG, N * NDIMC / NWG, (size_t)numBatchElts};
+  size_t localSizes[nKernelDims] = {MDIMC, NDIMC, 1};
+
+  cl_int err;
+  err = clEnqueueNDRangeKernel(
+    commandQueue, kernel, nKernelDims, NULL, globalSizes, localSizes, 0, NULL, eventBuf
+  );
+  return err;
+}
+
+cl_int OpenCLHelpers::doBatchedXGemmDirect_KM_KN_NM(
+  cl_kernel kernel,
+  cl_command_queue commandQueue,
+  const OpenCLTuneParams& tuneParams,
+  int M, int N, int K,
+  cl_mem A, cl_mem B, cl_mem C,
+  int numBatchElts,
+  cl_event* eventBuf
+) {
+  int cTranspose = 0;
 
   clSetKernelArg(kernel, 0, sizeof(int), (void *)&M);
   clSetKernelArg(kernel, 1, sizeof(int), (void *)&N);
@@ -469,7 +521,7 @@ cl_int OpenCLHelpers::doBatchedXGemm_KM_KN_MN(
   clSetKernelArg(kernel, 5, sizeof(cl_mem), (void *)&B);
   clSetKernelArg(kernel, 6, sizeof(int), (void *)&N);
   clSetKernelArg(kernel, 7, sizeof(cl_mem), (void *)&C);
-  clSetKernelArg(kernel, 8, sizeof(int), (void *)&N);
+  clSetKernelArg(kernel, 8, sizeof(int), (void *)&M);
   clSetKernelArg(kernel, 9, sizeof(int), (void *)&cTranspose);
 
   static constexpr int nKernelDims = 3;
@@ -490,7 +542,7 @@ cl_int OpenCLHelpers::doBatchedXGemm_KM_KN_MN(
   return err;
 }
 
-cl_int OpenCLHelpers::doStridedBatchedXGemm_KM_KN_MN(
+cl_int OpenCLHelpers::doStridedBatchedXGemmDirect_KM_KN_NM(
   cl_kernel kernel,
   cl_command_queue commandQueue,
   const OpenCLTuneParams& tuneParams,
@@ -500,7 +552,7 @@ cl_int OpenCLHelpers::doStridedBatchedXGemm_KM_KN_MN(
   int numBatchElts,
   cl_event* eventBuf
 ) {
-  int cTranspose = 1;
+  int cTranspose = 0;
 
   clSetKernelArg(kernel, 0, sizeof(int), (void *)&M);
   clSetKernelArg(kernel, 1, sizeof(int), (void *)&N);
@@ -512,7 +564,7 @@ cl_int OpenCLHelpers::doStridedBatchedXGemm_KM_KN_MN(
   clSetKernelArg(kernel, 7, sizeof(int), (void *)&N);
   clSetKernelArg(kernel, 8, sizeof(int), (void *)&bStride);
   clSetKernelArg(kernel, 9, sizeof(cl_mem), (void *)&C);
-  clSetKernelArg(kernel,10, sizeof(int), (void *)&N);
+  clSetKernelArg(kernel,10, sizeof(int), (void *)&M);
   clSetKernelArg(kernel,11, sizeof(int), (void *)&cStride);
   clSetKernelArg(kernel,12, sizeof(int), (void *)&cTranspose);
 
@@ -534,7 +586,7 @@ cl_int OpenCLHelpers::doStridedBatchedXGemm_KM_KN_MN(
   return err;
 }
 
-cl_int OpenCLHelpers::doBatchedXGemm_MK_NK_MN(
+cl_int OpenCLHelpers::doBatchedXGemmDirect_MK_NK_MN(
   cl_kernel kernel,
   cl_command_queue commandQueue,
   const OpenCLTuneParams& tuneParams,
@@ -579,12 +631,15 @@ cl_int OpenCLHelpers::doWinogradTransform(
   cl_command_queue commandQueue,
   const OpenCLTuneParams& tuneParams,
   cl_mem input, cl_mem convWorkspace,
-  int batchSize, int nnXLen, int nnYLen,
-  int numTilesX, int numTilesY,
-  int inChannels,
+  int nnXLen, int nnYLen,
+  int batchSize, int numTilesX, int numTilesY, int batchNumTilesPadMultiple,
+  int inChannels, int inChannelsPadMultiple,
   int convSize,
   cl_event* eventBuf
 ) {
+  int inChannelsPadded = roundUpToMultiple(inChannels, inChannelsPadMultiple);
+  int batchNumTilesPadded = roundUpToMultiple(batchSize * numTilesX * numTilesY, batchNumTilesPadMultiple);
+
   clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&input);
   clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&convWorkspace);
   clSetKernelArg(kernel, 2, sizeof(int), (void *)&batchSize);
@@ -593,18 +648,65 @@ cl_int OpenCLHelpers::doWinogradTransform(
   clSetKernelArg(kernel, 5, sizeof(int), (void *)&numTilesX);
   clSetKernelArg(kernel, 6, sizeof(int), (void *)&numTilesY);
   clSetKernelArg(kernel, 7, sizeof(int), (void *)&inChannels);
+  clSetKernelArg(kernel, 8, sizeof(int), (void *)&inChannelsPadded);
+  clSetKernelArg(kernel, 9, sizeof(int), (void *)&batchNumTilesPadded);
 
-  static constexpr int nKernelDims = 3;
+  static constexpr int nKernelDims = 2;
   size_t localSizes[nKernelDims] = {
     (size_t)(convSize == 3 ? tuneParams.conv3x3.transLocalSize0 : tuneParams.conv5x5.transLocalSize0),
     (size_t)(convSize == 3 ? tuneParams.conv3x3.transLocalSize1 : tuneParams.conv5x5.transLocalSize1),
-    (size_t)(convSize == 3 ? tuneParams.conv3x3.transLocalSize2 : tuneParams.conv5x5.transLocalSize2)
   };
 
   size_t globalSizes[nKernelDims] = {
-    roundUpToMultiple(powerOf2ify(numTilesX),localSizes[0]),
-    roundUpToMultiple(powerOf2ify(numTilesY),localSizes[1]),
-    roundUpToMultiple(batchSize * inChannels,localSizes[2])
+    roundUpToMultiple(batchNumTilesPadded, localSizes[0]),
+    roundUpToMultiple(inChannelsPadded,localSizes[1])
+  };
+
+  cl_int err;
+  err = clEnqueueNDRangeKernel(
+    commandQueue, kernel, nKernelDims, NULL, globalSizes, localSizes, 0, NULL, eventBuf
+  );
+  return err;
+}
+
+cl_int OpenCLHelpers::doWinogradTransformWithBNRelu(
+  cl_kernel kernel,
+  cl_command_queue commandQueue,
+  const OpenCLTuneParams& tuneParams,
+  cl_mem input, cl_mem convWorkspace,
+  cl_mem scaleBuf, cl_mem biasBuf, cl_mem mask,
+  int nnXLen, int nnYLen,
+  int batchSize, int numTilesX, int numTilesY, int batchNumTilesPadMultiple,
+  int inChannels, int inChannelsPadMultiple,
+  int convSize,
+  cl_event* eventBuf
+) {
+  int inChannelsPadded = roundUpToMultiple(inChannels, inChannelsPadMultiple);
+  int batchNumTilesPadded = roundUpToMultiple(batchSize * numTilesX * numTilesY, batchNumTilesPadMultiple);
+
+  clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&input);
+  clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&convWorkspace);
+  clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&scaleBuf);
+  clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&biasBuf);
+  clSetKernelArg(kernel, 4, sizeof(cl_mem), (void *)&mask);
+  clSetKernelArg(kernel, 5, sizeof(int), (void *)&batchSize);
+  clSetKernelArg(kernel, 6, sizeof(int), (void *)&nnXLen);
+  clSetKernelArg(kernel, 7, sizeof(int), (void *)&nnYLen);
+  clSetKernelArg(kernel, 8, sizeof(int), (void *)&numTilesX);
+  clSetKernelArg(kernel, 9, sizeof(int), (void *)&numTilesY);
+  clSetKernelArg(kernel, 10, sizeof(int), (void *)&inChannels);
+  clSetKernelArg(kernel, 11, sizeof(int), (void *)&inChannelsPadded);
+  clSetKernelArg(kernel, 12, sizeof(int), (void *)&batchNumTilesPadded);
+
+  static constexpr int nKernelDims = 2;
+  size_t localSizes[nKernelDims] = {
+    (size_t)(convSize == 3 ? tuneParams.conv3x3.transLocalSize0 : tuneParams.conv5x5.transLocalSize0),
+    (size_t)(convSize == 3 ? tuneParams.conv3x3.transLocalSize1 : tuneParams.conv5x5.transLocalSize1),
+  };
+
+  size_t globalSizes[nKernelDims] = {
+    roundUpToMultiple(batchNumTilesPadded, localSizes[0]),
+    roundUpToMultiple(inChannelsPadded,localSizes[1])
   };
 
   cl_int err;
@@ -619,12 +721,15 @@ cl_int OpenCLHelpers::doWinogradUntransform(
   cl_command_queue commandQueue,
   const OpenCLTuneParams& tuneParams,
   cl_mem convWorkspace2, cl_mem output,
-  int batchSize, int nnXLen, int nnYLen,
-  int numTilesX, int numTilesY,
-  int outChannels,
+  int nnXLen, int nnYLen,
+  int batchSize, int numTilesX, int numTilesY, int batchNumTilesPadMultiple,
+  int outChannels, int outChannelsPadMultiple,
   int convSize,
   cl_event* eventBuf
 ) {
+  int outChannelsPadded = roundUpToMultiple(outChannels, outChannelsPadMultiple);
+  int batchNumTilesPadded = roundUpToMultiple(batchSize * numTilesX * numTilesY, batchNumTilesPadMultiple);
+
   clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&convWorkspace2);
   clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&output);
   clSetKernelArg(kernel, 2, sizeof(int), (void *)&batchSize);
@@ -633,6 +738,8 @@ cl_int OpenCLHelpers::doWinogradUntransform(
   clSetKernelArg(kernel, 5, sizeof(int), (void *)&numTilesX);
   clSetKernelArg(kernel, 6, sizeof(int), (void *)&numTilesY);
   clSetKernelArg(kernel, 7, sizeof(int), (void *)&outChannels);
+  clSetKernelArg(kernel, 8, sizeof(int), (void *)&outChannelsPadded);
+  clSetKernelArg(kernel, 9, sizeof(int), (void *)&batchNumTilesPadded);
 
   static constexpr int nKernelDims = 3;
   size_t localSizes[nKernelDims] = {

@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "../core/global.h"
+#include "../core/commontypes.h"
 #include "../core/logger.h"
 #include "../core/multithread.h"
 #include "../game/board.h"
@@ -77,9 +78,7 @@ class NNEvaluator {
   NNEvaluator(
     const std::string& modelName,
     const std::string& modelFileName,
-    const std::vector<int>& gpuIdxs,
     Logger* logger,
-    int modelFileIdx,
     int maxBatchSize,
     int maxConcurrentEvals,
     int nnXLen,
@@ -89,22 +88,30 @@ class NNEvaluator {
     int nnCacheSizePowerOfTwo,
     int nnMutexPoolSizePowerofTwo,
     bool debugSkipNeuralNet,
-    float nnPolicyTemperature,
     std::string openCLTunerFile,
     bool openCLReTunePerBoardSize,
-    bool useFP16,
-    bool useNHWC
+    enabled_t useFP16Mode,
+    enabled_t useNHWCMode,
+    int numThreads,
+    const std::vector<int>& gpuIdxByServerThread,
+    const std::string& randSeed,
+    bool doRandomize,
+    int defaultSymmetry
   );
   ~NNEvaluator();
 
+  NNEvaluator(const NNEvaluator& other) = delete;
+  NNEvaluator& operator=(const NNEvaluator& other) = delete;
+
   std::string getModelName() const;
   std::string getModelFileName() const;
+  std::string getInternalModelName() const;
   bool isNeuralNetLess() const;
   int getMaxBatchSize() const;
   int getNNXLen() const;
   int getNNYLen() const;
-  bool getUsingFP16() const;
-  bool getUsingNHWC() const;
+  enabled_t getUsingFP16Mode() const;
+  enabled_t getUsingNHWCMode() const;
 
   //Return the "nearest" supported ruleset to desiredRules by this model.
   //Fills supported with true if desiredRules itself was exactly supported, false if some modifications had to be made.
@@ -123,27 +130,26 @@ class NNEvaluator {
     Player nextPlayer,
     const MiscNNInputParams& nnInputParams,
     NNResultBuf& buf,
-    Logger* logger,
     bool skipCache,
     bool includeOwnerMap
   );
 
-  //Actually spawn threads and return the results.
+  //Actually spawn threads to handle evaluations.
   //If doRandomize, uses randSeed as a seed, further randomized per-thread
   //If not doRandomize, uses defaultSymmetry for all nn evaluations.
   //This function itself is not threadsafe.
-  void spawnServerThreads(
-    int numThreads,
-    bool doRandomize,
-    std::string randSeed,
-    int defaultSymmetry,
-    Logger& logger,
-    std::vector<int> gpuIdxByServerThread
-  );
+  void spawnServerThreads();
 
   //Kill spawned server threads and join and free them. This function is not threadsafe, and along with spawnServerThreads
   //should have calls to it and spawnServerThreads singlethreaded.
   void killServerThreads();
+
+  //These are thread-safe. Setting them in the middle of operation might only affect future
+  //neural net evals, rather than any in-flight.
+  bool getDoRandomize() const;
+  int getDefaultSymmetry() const;
+  void setDoRandomize(bool b);
+  void setDefaultSymmetry(int s);
 
   //Some stats
   uint64_t numRowsProcessed() const;
@@ -153,38 +159,50 @@ class NNEvaluator {
   void clearStats();
 
  private:
-  std::string modelName;
-  std::string modelFileName;
-  int nnXLen;
-  int nnYLen;
-  bool requireExactNNLen;
-  int policySize;
-  bool inputsUseNHWC;
-  bool usingFP16;
-  bool usingNHWC;
+  const std::string modelName;
+  const std::string modelFileName;
+  const int nnXLen;
+  const int nnYLen;
+  const bool requireExactNNLen;
+  const int policySize;
+  const bool inputsUseNHWC;
+  const enabled_t usingFP16Mode;
+  const enabled_t usingNHWCMode;
+  const int numThreads;
+  const std::vector<int> gpuIdxByServerThread;
+  const std::string randSeed;
+  const bool debugSkipNeuralNet;
 
   ComputeContext* computeContext;
   LoadedModel* loadedModel;
   NNCacheTable* nnCacheTable;
-
-  bool debugSkipNeuralNet;
-  float nnPolicyInvTemperature;
+  Logger* logger;
 
   int modelVersion;
   int inputsVersion;
 
+  int numServerThreadsEverSpawned;
   std::vector<std::thread*> serverThreads;
 
-  std::condition_variable serverWaitingForBatchStart;
-  std::mutex bufferMutex;
-  bool isKilled;
-
+  //These are basically constant
   int maxNumRows;
   int numResultBufss;
   int numResultBufssMask;
 
+  //Counters for statistics
   std::atomic<uint64_t> m_numRowsProcessed;
   std::atomic<uint64_t> m_numBatchesProcessed;
+
+  std::condition_variable serverWaitingForBatchStart;
+  mutable std::mutex bufferMutex;
+
+  //Everything under here is protected under bufferMutex--------------------------------------------
+
+  bool isKilled; //Flag used for killing server threads
+
+  //Randomization settings for symmetries
+  bool currentDoRandomize;
+  int currentDefaultSymmetry;
 
   //An array of NNResultBuf** of length numResultBufss, each NNResultBuf** is an array of NNResultBuf* of length maxNumRows.
   //If a full resultBufs array fills up, client threads can move on to fill up more without waiting. Implemented basically
@@ -196,10 +214,7 @@ class NNEvaluator {
 
  public:
   //Helper, for internal use only
-  void serve(
-    NNServerBuf& buf, Rand& rand, Logger* logger, bool doRandomize, int defaultSymmetry,
-    int gpuIdxForThisThread, bool useFP16, bool useNHWC
-  );
+  void serve(NNServerBuf& buf, Rand& rand,int gpuIdxForThisThread);
 };
 
 #endif  // NEURALNET_NNEVAL_H_

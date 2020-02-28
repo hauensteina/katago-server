@@ -19,13 +19,15 @@ class AsyncBot {
   Player getRootPla() const;
   SearchParams getParams() const;
 
-  Search* getSearch();
+  //Get the search directly. If the asyncbot is doing anything asynchronous, the search MAY STILL BE RUNNING!
   const Search* getSearch() const;
+  //Get the search, after stopping and waiting to terminate any existing search
+  //Note that one still should NOT mind any threading issues using this search object and other asyncBot calls at the same time.
+  Search* getSearchStopAndWait();
 
   //Setup, same as in search.h
   //Calling any of these will stop any ongoing search, waiting for a full stop.
   void setPosition(Player pla, const Board& board, const BoardHistory& history);
-  void setRulesAndClearHistory(Rules rules, int encorePhase);
   void setKomiIfNew(float newKomi);
   void setRootPassLegal(bool b);
   void setAlwaysIncludeOwnerMap(bool b);

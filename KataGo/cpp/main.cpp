@@ -22,11 +22,13 @@ static void printHelp(int argc, const char* argv[]) {
 ---Common subcommands------------------
 
 gtp : Runs GTP engine that can be plugged into any standard Go GUI for play/analysis.
+benchmark : Test speed with different numbers of search threads.
+genconfig : User-friendly interface to generate a config with rules and automatic performance tuning.
+
 match : Run self-play match games based on a config, more efficient than gtp due to batching.
 version : Print version and exit.
 
 analysis : Runs an engine designed to analyze entire games in parallel.
-benchmark : Test speed with different numbers of search threads.
 tuner : (OpenCL only) Run tuning to find and optimize parameters that work on your GPU.
 
 ---Selfplay training subcommands---------
@@ -42,10 +44,12 @@ runnnlayertests : Test a few subcomponents of the current neural net backend
 
 runnnontinyboardtest : Run neural net on a tiny board and dump result to stdout
 runnnsymmetriestest : Run neural net on a hardcoded rectangle board and dump symmetries result
+runownershiptests : Run neural net search on some hardcoded positions and print avg ownership
 
 runoutputtests : Run a bunch of things and dump details to stdout
 runsearchtests : Run a bunch of things using a neural net and dump details to stdout
 runsearchtestsv3 : Run a bunch more things using a neural net and dump details to stdout
+runsearchtestsv8 : Run a bunch more things using a neural net and dump details to stdout
 runselfplayinittests : Run some tests involving selfplay training init using a neural net and dump details to stdout
 runsekitrainwritetests : Run some tests involving seki train output
 
@@ -67,6 +71,8 @@ static int handleSubcommand(const string& subcommand, int argc, const char* argv
     return MainCmds::evalsgf(argc-1,&argv[1]);
   else if(subcommand == "gatekeeper")
     return MainCmds::gatekeeper(argc-1,&argv[1]);
+  else if(subcommand == "genconfig")
+    return MainCmds::genconfig(argc-1,&argv[1],argv[0]);
   else if(subcommand == "gtp")
     return MainCmds::gtp(argc-1,&argv[1]);
   else if(subcommand == "tuner")
@@ -85,12 +91,16 @@ static int handleSubcommand(const string& subcommand, int argc, const char* argv
     return MainCmds::runnnontinyboardtest(argc-1,&argv[1]);
   else if(subcommand == "runnnsymmetriestest")
     return MainCmds::runnnsymmetriestest(argc-1,&argv[1]);
+  else if(subcommand == "runownershiptests")
+    return MainCmds::runownershiptests(argc-1,&argv[1]);
   else if(subcommand == "runoutputtests")
     return MainCmds::runoutputtests(argc-1,&argv[1]);
   else if(subcommand == "runsearchtests")
     return MainCmds::runsearchtests(argc-1,&argv[1]);
   else if(subcommand == "runsearchtestsv3")
     return MainCmds::runsearchtestsv3(argc-1,&argv[1]);
+  else if(subcommand == "runsearchtestsv8")
+    return MainCmds::runsearchtestsv8(argc-1,&argv[1]);
   else if(subcommand == "runselfplayinittests")
     return MainCmds::runselfplayinittests(argc-1,&argv[1]);
   else if(subcommand == "runsekitrainwritetests")
@@ -159,11 +169,11 @@ int main(int argc, const char* argv[]) {
 
 
 string Version::getKataGoVersion() {
-  return string("1.3.1");
+  return string("1.3.3");
 }
 
 string Version::getKataGoVersionForHelp() {
-  return string("KataGo v1.3.1");
+  return string("KataGo v1.3.3");
 }
 
 string Version::getGitRevision() {

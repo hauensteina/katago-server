@@ -44,6 +44,7 @@ SearchParams::SearchParams()
    localExplore(false),
    playoutDoublingAdvantage(0.0),
    playoutDoublingAdvantagePla(C_EMPTY),
+   nnPolicyTemperature(1.0f),
    mutexPoolSize(8192),
    numVirtualLossesPerThread(3),
    numThreads(1),
@@ -60,3 +61,23 @@ SearchParams::SearchParams()
 
 SearchParams::~SearchParams()
 {}
+
+SearchParams SearchParams::forTestsV1() {
+  SearchParams params;
+  params.staticScoreUtilityFactor = 0.1;
+  params.dynamicScoreUtilityFactor = 0.3;
+  params.dynamicScoreCenterZeroWeight = 0.2;
+  params.dynamicScoreCenterScale = 0.75;
+  params.cpuctExploration = 0.9;
+  params.cpuctExplorationLog = 0.4;
+  params.rootFpuReductionMax = 0.1;
+  params.rootPolicyTemperatureEarly = 1.2;
+  params.rootPolicyTemperature = 1.1;
+  params.useLcbForSelection = true;
+  params.lcbStdevs = 5;
+  params.minVisitPropForLCB = 0.15;
+  params.rootEndingBonusPoints = 0.5;
+  params.rootPruneUselessMoves = true;
+  params.conservativePass = true;
+  return params;
+}

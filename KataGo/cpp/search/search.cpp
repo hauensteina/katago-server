@@ -257,14 +257,12 @@ void Search::setPlayerAndClearHistory(Player pla) {
   rootPla = pla;
   rootBoard.clearSimpleKoLoc();
   Rules rules = rootHistory.rules;
-  rootHistory.clear(rootBoard,rootPla,rules,rootHistory.encorePhase);
-  rootKoHashTable->recompute(rootHistory);
-}
 
-void Search::setRulesAndClearHistory(Rules rules, int encorePhase) {
-  clearSearch();
-  rootBoard.clearSimpleKoLoc();
-  rootHistory.clear(rootBoard,rootPla,rules,encorePhase);
+  //Preserve this value even when we get multiple moves in a row by some player
+  bool assumeMultipleStartingBlackMovesAreHandicap = rootHistory.assumeMultipleStartingBlackMovesAreHandicap;
+  rootHistory.clear(rootBoard,rootPla,rules,rootHistory.encorePhase);
+  rootHistory.setAssumeMultipleStartingBlackMovesAreHandicap(assumeMultipleStartingBlackMovesAreHandicap);
+
   rootKoHashTable->recompute(rootHistory);
 }
 
@@ -534,7 +532,7 @@ void Search::runWholeSearch(Logger& logger, std::atomic<bool>& shouldStopNow, bo
     }
   }
 
-  beginSearch(logger);
+  beginSearch();
   int64_t numNonPlayoutVisits = numRootVisits();
 
   auto searchLoop = [this,&timer,&numPlayoutsShared,numNonPlayoutVisits,&logger,&shouldStopNow,maxVisits,maxPlayouts,maxTime](int threadIdx) {
@@ -594,7 +592,7 @@ void Search::runWholeSearch(Logger& logger, std::atomic<bool>& shouldStopNow, bo
 //If we're being asked to search from a position where the game is over, this is fine. Just keep going, the boardhistory
 //should reasonably tolerate just continuing. We do NOT want to clear history because we could inadvertently make a move
 //that an external ruleset COULD think violated superko.
-void Search::beginSearch(Logger& logger) {
+void Search::beginSearch() {
   if(rootBoard.x_size > nnXLen || rootBoard.y_size > nnYLen)
     throw StringError("Search got from NNEval nnXLen = " + Global::intToString(nnXLen) +
                       " nnYLen = " + Global::intToString(nnYLen) + " but was asked to search board with larger x or y size");
@@ -611,7 +609,7 @@ void Search::beginSearch(Logger& logger) {
     clearSearch();
   rootPlaDuringLastSearch = rootPla;
 
-  computeRootValues(logger);
+  computeRootValues();
   maybeRecomputeNormToTApproxTable();
 
   //Sanity-check a few things
@@ -739,7 +737,7 @@ void Search::recursivelyRecomputeStats(SearchNode& node, SearchThread& thread, b
 }
 
 
-void Search::computeRootValues(Logger& logger) {
+void Search::computeRootValues() {
   //rootSafeArea is strictly pass-alive groups and strictly safe territory.
   bool nonPassAliveStones = false;
   bool safeBigTerritories = false;
@@ -778,10 +776,11 @@ void Search::computeRootValues(Logger& logger) {
       NNResultBuf nnResultBuf;
       bool skipCache = false;
       bool includeOwnerMap = true;
-      bool isRoot = true;
+      // bool isRoot = true;
       MiscNNInputParams nnInputParams;
       nnInputParams.drawEquivalentWinsForWhite = searchParams.drawEquivalentWinsForWhite;
-      nnInputParams.conservativePass = isRoot && searchParams.conservativePass;
+      nnInputParams.conservativePass = searchParams.conservativePass;
+      nnInputParams.nnPolicyTemperature = searchParams.nnPolicyTemperature;
       if(searchParams.playoutDoublingAdvantage != 0) {
         Player playoutDoublingAdvantagePla = searchParams.playoutDoublingAdvantagePla == C_EMPTY ? rootPla : searchParams.playoutDoublingAdvantagePla;
         nnInputParams.playoutDoublingAdvantage = (
@@ -791,7 +790,7 @@ void Search::computeRootValues(Logger& logger) {
       nnEvaluator->evaluate(
         board, hist, pla,
         nnInputParams,
-        nnResultBuf, &logger, skipCache, includeOwnerMap
+        nnResultBuf, skipCache, includeOwnerMap
       );
       expectedScore = nnResultBuf.result->whiteScoreMean;
     }
@@ -1691,7 +1690,8 @@ void Search::initNodeNNOutput(
   bool includeOwnerMap = isRoot || alwaysIncludeOwnerMap;
   MiscNNInputParams nnInputParams;
   nnInputParams.drawEquivalentWinsForWhite = searchParams.drawEquivalentWinsForWhite;
-  nnInputParams.conservativePass = isRoot && searchParams.conservativePass;
+  nnInputParams.conservativePass = searchParams.conservativePass;
+  nnInputParams.nnPolicyTemperature = searchParams.nnPolicyTemperature;
   if(searchParams.playoutDoublingAdvantage != 0) {
     Player playoutDoublingAdvantagePla = searchParams.playoutDoublingAdvantagePla == C_EMPTY ? rootPla : searchParams.playoutDoublingAdvantagePla;
     nnInputParams.playoutDoublingAdvantage = (
@@ -1705,7 +1705,7 @@ void Search::initNodeNNOutput(
       nnEvaluator->evaluate(
         thread.board, thread.history, thread.pla,
         nnInputParams,
-        thread.nnResultBuf, thread.logger, skipCacheThisIteration, includeOwnerMap
+        thread.nnResultBuf, skipCacheThisIteration, includeOwnerMap
       );
       ptrs.push_back(std::move(thread.nnResultBuf.result));
     }
@@ -1715,7 +1715,7 @@ void Search::initNodeNNOutput(
     nnEvaluator->evaluate(
       thread.board, thread.history, thread.pla,
       nnInputParams,
-      thread.nnResultBuf, thread.logger, skipCache, includeOwnerMap
+      thread.nnResultBuf, skipCache, includeOwnerMap
     );
     node.nnOutput = std::move(thread.nnResultBuf.result);
   }

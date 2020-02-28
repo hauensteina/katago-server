@@ -17,11 +17,13 @@ NNEvaluator* Setup::initializeNNEvaluator(
   Rand& seedRand,
   int maxConcurrentEvals,
   int defaultNNXLen,
-  int defaultNNYLen
+  int defaultNNYLen,
+  int defaultMaxBatchSize,
+  setup_for_t setupFor
 ) {
   vector<NNEvaluator*> nnEvals =
     initializeNNEvaluators(
-      {nnModelName},{nnModelFile},cfg,logger,seedRand,maxConcurrentEvals,defaultNNXLen,defaultNNYLen
+      {nnModelName},{nnModelFile},cfg,logger,seedRand,maxConcurrentEvals,defaultNNXLen,defaultNNYLen,defaultMaxBatchSize,setupFor
     );
   assert(nnEvals.size() == 1);
   return nnEvals[0];
@@ -35,7 +37,9 @@ vector<NNEvaluator*> Setup::initializeNNEvaluators(
   Rand& seedRand,
   int maxConcurrentEvals,
   int defaultNNXLen,
-  int defaultNNYLen
+  int defaultNNYLen,
+  int defaultMaxBatchSize,
+  setup_for_t setupFor
 ) {
   vector<NNEvaluator*> nnEvals;
   assert(nnModelNames.size() == nnModelFiles.size());
@@ -64,7 +68,6 @@ vector<NNEvaluator*> Setup::initializeNNEvaluators(
 
     bool debugSkipNeuralNetDefault = (nnModelFile == "/dev/null");
     bool debugSkipNeuralNet = cfg.contains("debugSkipNeuralNet") ? cfg.getBool("debugSkipNeuralNet") : debugSkipNeuralNetDefault;
-    int modelFileIdx = i;
 
     int nnXLen = std::max(defaultNNXLen,7);
     int nnYLen = std::max(defaultNNYLen,7);
@@ -102,13 +105,8 @@ vector<NNEvaluator*> Setup::initializeNNEvaluators(
     else if(cfg.contains("inputsUseNHWC"))
       inputsUseNHWC = cfg.getBool("inputsUseNHWC");
 
-    float nnPolicyTemperature = 1.0f;
-    if(cfg.contains("nnPolicyTemperature"+idxStr))
-      nnPolicyTemperature = cfg.getFloat("nnPolicyTemperature"+idxStr,0.01f,5.0f);
-    else if(cfg.contains("nnPolicyTemperature"))
-      nnPolicyTemperature = cfg.getFloat("nnPolicyTemperature",0.01f,5.0f);
+    bool nnRandomize = cfg.contains("nnRandomize") ? cfg.getBool("nnRandomize") : true;
 
-    bool nnRandomize = cfg.getBool("nnRandomize");
     string nnRandSeed;
     if(cfg.contains("nnRandSeed" + idxStr))
       nnRandSeed = cfg.getString("nnRandSeed" + idxStr);
@@ -118,8 +116,8 @@ vector<NNEvaluator*> Setup::initializeNNEvaluators(
       nnRandSeed = Global::uint64ToString(seedRand.nextUInt64());
     logger.write("nnRandSeed" + idxStr + " = " + nnRandSeed);
 
-
-    int numNNServerThreadsPerModel = cfg.getInt("numNNServerThreadsPerModel",1,1024);
+    int numNNServerThreadsPerModel =
+      cfg.contains("numNNServerThreadsPerModel") ? cfg.getInt("numNNServerThreadsPerModel",1,1024) : 1;
 
     vector<int> gpuIdxByServerThread;
     for(int j = 0; j<numNNServerThreadsPerModel; j++) {
@@ -167,29 +165,25 @@ vector<NNEvaluator*> Setup::initializeNNEvaluators(
     if(cfg.contains("openclReTunePerBoardSize"))
       openCLReTunePerBoardSize = cfg.getBool("openclReTunePerBoardSize");
 
-    vector<int> gpuIdxs = gpuIdxByServerThread;
-    std::sort(gpuIdxs.begin(), gpuIdxs.end());
-    std::unique(gpuIdxs.begin(), gpuIdxs.end());
-
-    bool useFP16 = false;
+    enabled_t useFP16Mode = enabled_t::Auto;
     if(cfg.contains(backendPrefix+"UseFP16-"+idxStr))
-      useFP16 = cfg.getBool(backendPrefix+"UseFP16-"+idxStr);
+      useFP16Mode = cfg.getEnabled(backendPrefix+"UseFP16-"+idxStr);
     else if(cfg.contains("useFP16-"+idxStr))
-      useFP16 = cfg.getBool("useFP16-"+idxStr);
+      useFP16Mode = cfg.getEnabled("useFP16-"+idxStr);
     else if(cfg.contains(backendPrefix+"UseFP16"))
-      useFP16 = cfg.getBool(backendPrefix+"UseFP16");
+      useFP16Mode = cfg.getEnabled(backendPrefix+"UseFP16");
     else if(cfg.contains("useFP16"))
-      useFP16 = cfg.getBool("useFP16");
+      useFP16Mode = cfg.getEnabled("useFP16");
 
-    bool useNHWC = false;
+    enabled_t useNHWCMode = enabled_t::Auto;
     if(cfg.contains(backendPrefix+"UseNHWC"+idxStr))
-      useNHWC = cfg.getBool(backendPrefix+"UseNHWC"+idxStr);
+      useNHWCMode = cfg.getEnabled(backendPrefix+"UseNHWC"+idxStr);
     else if(cfg.contains("useNHWC"+idxStr))
-      useNHWC = cfg.getBool("useNHWC"+idxStr);
+      useNHWCMode = cfg.getEnabled("useNHWC"+idxStr);
     else if(cfg.contains(backendPrefix+"UseNHWC"))
-      useNHWC = cfg.getBool(backendPrefix+"UseNHWC");
+      useNHWCMode = cfg.getEnabled(backendPrefix+"UseNHWC");
     else if(cfg.contains("useNHWC"))
-      useNHWC = cfg.getBool("useNHWC");
+      useNHWCMode = cfg.getEnabled("useNHWC");
 
     int forcedSymmetry = -1;
     if(cfg.contains("nnForcedSymmetry"))
@@ -197,41 +191,66 @@ vector<NNEvaluator*> Setup::initializeNNEvaluators(
 
     logger.write(
       "After dedups: nnModelFile" + idxStr + " = " + nnModelFile
-      + " useFP16 " + Global::boolToString(useFP16)
-      + " useNHWC " + Global::boolToString(useNHWC)
+      + " useFP16 " + useFP16Mode.toString()
+      + " useNHWC " + useNHWCMode.toString()
     );
+
+    int nnCacheSizePowerOfTwo =
+      cfg.contains("nnCacheSizePowerOfTwo") ? cfg.getInt("nnCacheSizePowerOfTwo", -1, 48) :
+      setupFor == SETUP_FOR_GTP ? 20 :
+      setupFor == SETUP_FOR_BENCHMARK ? 20 :
+      setupFor == SETUP_FOR_MATCH ? 21 :
+      setupFor == SETUP_FOR_ANALYSIS ? 23 :
+      cfg.getInt("nnCacheSizePowerOfTwo", -1, 48);
+
+    int nnMutexPoolSizePowerOfTwo =
+      cfg.contains("nnMutexPoolSizePowerOfTwo") ? cfg.getInt("nnMutexPoolSizePowerOfTwo", -1, 24) :
+      setupFor == SETUP_FOR_GTP ? 16 :
+      setupFor == SETUP_FOR_BENCHMARK ? 16 :
+      setupFor == SETUP_FOR_MATCH ? 17 :
+      setupFor == SETUP_FOR_ANALYSIS ? 17 :
+      cfg.getInt("nnMutexPoolSizePowerOfTwo", -1, 24);
+
+    int nnMaxBatchSize;
+    if(setupFor == SETUP_FOR_BENCHMARK) {
+      nnMaxBatchSize = defaultMaxBatchSize;
+    }
+    else if(defaultMaxBatchSize > 0) {
+      nnMaxBatchSize =
+        cfg.contains("nnMaxBatchSize") ? cfg.getInt("nnMaxBatchSize", 1, 65536) :
+        defaultMaxBatchSize;
+    }
+    else {
+      nnMaxBatchSize = cfg.getInt("nnMaxBatchSize", 1, 65536);
+    }
+
+    int defaultSymmetry = forcedSymmetry >= 0 ? forcedSymmetry : 0;
 
     NNEvaluator* nnEval = new NNEvaluator(
       nnModelName,
       nnModelFile,
-      gpuIdxs,
       &logger,
-      modelFileIdx,
-      cfg.getInt("nnMaxBatchSize", 1, 65536),
+      nnMaxBatchSize,
       maxConcurrentEvals,
       nnXLen,
       nnYLen,
       requireExactNNLen,
       inputsUseNHWC,
-      cfg.getInt("nnCacheSizePowerOfTwo", -1, 48),
-      cfg.getInt("nnMutexPoolSizePowerOfTwo", -1, 24),
+      nnCacheSizePowerOfTwo,
+      nnMutexPoolSizePowerOfTwo,
       debugSkipNeuralNet,
-      nnPolicyTemperature,
       openCLTunerFile,
       openCLReTunePerBoardSize,
-      useFP16,
-      useNHWC
+      useFP16Mode,
+      useNHWCMode,
+      numNNServerThreadsPerModel,
+      gpuIdxByServerThread,
+      nnRandSeed,
+      (forcedSymmetry >= 0 ? false : nnRandomize),
+      defaultSymmetry
     );
 
-    int defaultSymmetry = forcedSymmetry >= 0 ? forcedSymmetry : 0;
-    nnEval->spawnServerThreads(
-      numNNServerThreadsPerModel,
-      (forcedSymmetry >= 0 ? false : nnRandomize),
-      nnRandSeed,
-      defaultSymmetry,
-      logger,
-      gpuIdxByServerThread
-    );
+    nnEval->spawnServerThreads();
 
     nnEvals.push_back(nnEval);
   }
@@ -296,8 +315,8 @@ vector<SearchParams> Setup::loadParams(
     if(cfg.contains("searchFactorAfterTwoPass"+idxStr)) params.searchFactorAfterTwoPass = cfg.getDouble("searchFactorAfterTwoPass"+idxStr, 0.0, 1.0);
     else if(cfg.contains("searchFactorAfterTwoPass"))   params.searchFactorAfterTwoPass = cfg.getDouble("searchFactorAfterTwoPass",        0.0, 1.0);
 
-    if(cfg.contains("numSearchThreads"+idxStr)) params.numThreads = cfg.getInt("numSearchThreads"+idxStr, 1, 1024);
-    else                                        params.numThreads = cfg.getInt("numSearchThreads",        1, 1024);
+    if(cfg.contains("numSearchThreads"+idxStr)) params.numThreads = cfg.getInt("numSearchThreads"+idxStr, 1, 4096);
+    else                                        params.numThreads = cfg.getInt("numSearchThreads",        1, 4096);
 
     if(cfg.contains("winLossUtilityFactor"+idxStr)) params.winLossUtilityFactor = cfg.getDouble("winLossUtilityFactor"+idxStr, 0.0, 1.0);
     else if(cfg.contains("winLossUtilityFactor"))   params.winLossUtilityFactor = cfg.getDouble("winLossUtilityFactor",        0.0, 1.0);
@@ -434,9 +453,16 @@ vector<SearchParams> Setup::loadParams(
     else if(cfg.contains("playoutDoublingAdvantagePla"))   params.playoutDoublingAdvantagePla = parsePlayer("playoutDoublingAdvantagePla",cfg.getString("playoutDoublingAdvantagePla"));
     else                                                   params.playoutDoublingAdvantagePla = C_EMPTY;
 
+    if(cfg.contains("nnPolicyTemperature"+idxStr))
+      params.nnPolicyTemperature = cfg.getFloat("nnPolicyTemperature"+idxStr,0.01f,5.0f);
+    else if(cfg.contains("nnPolicyTemperature"))
+      params.nnPolicyTemperature = cfg.getFloat("nnPolicyTemperature",0.01f,5.0f);
+    else
+      params.nnPolicyTemperature = 1.0f;
+
     if(cfg.contains("mutexPoolSize"+idxStr)) params.mutexPoolSize = (uint32_t)cfg.getInt("mutexPoolSize"+idxStr, 1, 1 << 24);
     else if(cfg.contains("mutexPoolSize"))   params.mutexPoolSize = (uint32_t)cfg.getInt("mutexPoolSize",        1, 1 << 24);
-    else                                     params.mutexPoolSize = 8192;
+    else                                     params.mutexPoolSize = 16384;
     if(cfg.contains("numVirtualLossesPerThread"+idxStr)) params.numVirtualLossesPerThread = (int32_t)cfg.getInt("numVirtualLossesPerThread"+idxStr, 1, 1000);
     else if(cfg.contains("numVirtualLossesPerThread"))   params.numVirtualLossesPerThread = (int32_t)cfg.getInt("numVirtualLossesPerThread",        1, 1000);
     else                                                 params.numVirtualLossesPerThread = 1;
@@ -470,43 +496,65 @@ Rules Setup::loadSingleRulesExceptForKomi(
 ) {
   Rules rules;
 
-  string koRule = cfg.getString("koRule", Rules::koRuleStrings());
-  string scoringRule = cfg.getString("scoringRule", Rules::scoringRuleStrings());
-  bool multiStoneSuicideLegal = cfg.getBool("multiStoneSuicideLegal");
-  bool hasButton = cfg.contains("hasButton") ? cfg.getBool("hasButton") : false;
-  float komi = 7.5f;
+  if(cfg.contains("rules")) {
+    if(cfg.contains("koRule")) throw StringError("Cannot both specify 'rules' and individual rules like koRule");
+    if(cfg.contains("scoringRule")) throw StringError("Cannot both specify 'rules' and individual rules like scoringRule");
+    if(cfg.contains("multiStoneSuicideLegal")) throw StringError("Cannot both specify 'rules' and individual rules like multiStoneSuicideLegal");
+    if(cfg.contains("hasButton")) throw StringError("Cannot both specify 'rules' and individual rules like hasButton");
+    if(cfg.contains("taxRule")) throw StringError("Cannot both specify 'rules' and individual rules like taxRule");
+    if(cfg.contains("whiteHandicapBonus")) throw StringError("Cannot both specify 'rules' and individual rules like whiteHandicapBonus");
+    if(cfg.contains("whiteBonusPerHandicapStone")) throw StringError("Cannot both specify 'rules' and individual rules like whiteBonusPerHandicapStone");
 
-  rules.koRule = Rules::parseKoRule(koRule);
-  rules.scoringRule = Rules::parseScoringRule(scoringRule);
-  rules.multiStoneSuicideLegal = multiStoneSuicideLegal;
-  rules.hasButton = hasButton;
-  rules.komi = komi;
-
-  if(cfg.contains("taxRule")) {
-    string taxRule = cfg.getString("taxRule", Rules::taxRuleStrings());
-    rules.taxRule = Rules::parseTaxRule(taxRule);
+    rules = Rules::parseRules(cfg.getString("rules"));
   }
   else {
-    rules.taxRule = (rules.scoringRule == Rules::SCORING_TERRITORY ? Rules::TAX_SEKI : Rules::TAX_NONE);
-  }
+    string koRule = cfg.getString("koRule", Rules::koRuleStrings());
+    string scoringRule = cfg.getString("scoringRule", Rules::scoringRuleStrings());
+    bool multiStoneSuicideLegal = cfg.getBool("multiStoneSuicideLegal");
+    bool hasButton = cfg.contains("hasButton") ? cfg.getBool("hasButton") : false;
+    float komi = 7.5f;
 
-  if(rules.hasButton && rules.scoringRule != Rules::SCORING_AREA)
-    throw StringError("Config specifies hasButton=true on a scoring system other than AREA");
+    rules.koRule = Rules::parseKoRule(koRule);
+    rules.scoringRule = Rules::parseScoringRule(scoringRule);
+    rules.multiStoneSuicideLegal = multiStoneSuicideLegal;
+    rules.hasButton = hasButton;
+    rules.komi = komi;
 
-  //Also handles parsing of legacy option whiteBonusPerHandicapStone
-  if(cfg.contains("whiteBonusPerHandicapStone") && cfg.contains("whiteHandicapBonus"))
-    throw StringError("May specify only one of whiteBonusPerHandicapStone and whiteHandicapBonus in config");
-  else if(cfg.contains("whiteHandicapBonus"))
-    rules.whiteHandicapBonusRule = Rules::parseWhiteHandicapBonusRule(cfg.getString("whiteHandicapBonus", Rules::whiteHandicapBonusRuleStrings()));
-  else if(cfg.contains("whiteBonusPerHandicapStone")) {
-    int whiteBonusPerHandicapStone = cfg.getInt("whiteBonusPerHandicapStone",0,1);
-    if(whiteBonusPerHandicapStone == 0)
-      rules.whiteHandicapBonusRule = Rules::WHB_ZERO;
+    if(cfg.contains("taxRule")) {
+      string taxRule = cfg.getString("taxRule", Rules::taxRuleStrings());
+      rules.taxRule = Rules::parseTaxRule(taxRule);
+    }
+    else {
+      rules.taxRule = (rules.scoringRule == Rules::SCORING_TERRITORY ? Rules::TAX_SEKI : Rules::TAX_NONE);
+    }
+
+    if(rules.hasButton && rules.scoringRule != Rules::SCORING_AREA)
+      throw StringError("Config specifies hasButton=true on a scoring system other than AREA");
+
+    //Also handles parsing of legacy option whiteBonusPerHandicapStone
+    if(cfg.contains("whiteBonusPerHandicapStone") && cfg.contains("whiteHandicapBonus"))
+      throw StringError("May specify only one of whiteBonusPerHandicapStone and whiteHandicapBonus in config");
+    else if(cfg.contains("whiteHandicapBonus"))
+      rules.whiteHandicapBonusRule = Rules::parseWhiteHandicapBonusRule(cfg.getString("whiteHandicapBonus", Rules::whiteHandicapBonusRuleStrings()));
+    else if(cfg.contains("whiteBonusPerHandicapStone")) {
+      int whiteBonusPerHandicapStone = cfg.getInt("whiteBonusPerHandicapStone",0,1);
+      if(whiteBonusPerHandicapStone == 0)
+        rules.whiteHandicapBonusRule = Rules::WHB_ZERO;
+      else
+        rules.whiteHandicapBonusRule = Rules::WHB_N;
+    }
     else
-      rules.whiteHandicapBonusRule = Rules::WHB_N;
+      rules.whiteHandicapBonusRule = Rules::WHB_ZERO;
   }
-  else
-    rules.whiteHandicapBonusRule = Rules::WHB_ZERO;
 
   return rules;
+}
+
+vector<pair<set<string>,set<string>>> Setup::getMutexKeySets() {
+  vector<pair<set<string>,set<string>>> mutexKeySets = {
+    std::make_pair<set<string>,set<string>>(
+    {"rules"},{"koRule","scoringRule","multiStoneSuicideLegal","taxRule","hasButton","whiteBonusPerHandicapStone","whiteHandicapBonus"}
+    ),
+  };
+  return mutexKeySets;
 }

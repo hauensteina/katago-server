@@ -111,6 +111,92 @@ bool OpenCLTuneParams::XGemmDirectParams::isValid() const {
   return true;
 }
 
+string OpenCLTuneParams::XGemmParams::desc() const {
+  string s;
+  s += "MWG=" + Global::intToString(MWG);
+  s += " NWG=" + Global::intToString(NWG);
+  s += " KWG=" + Global::intToString(KWG);
+  s += " MDIMC=" + Global::intToString(MDIMC);
+  s += " NDIMC=" + Global::intToString(NDIMC);
+  s += " MDIMA=" + Global::intToString(MDIMA);
+  s += " NDIMB=" + Global::intToString(NDIMB);
+  s += " KWI=" + Global::intToString(KWI);
+  s += " VWM=" + Global::intToString(VWM);
+  s += " VWN=" + Global::intToString(VWN);
+  s += " STRM=" + Global::intToString(STRM);
+  s += " STRN=" + Global::intToString(STRN);
+  s += " SA=" + Global::intToString(SA);
+  s += " SB=" + Global::intToString(SB);
+  return s;
+}
+string OpenCLTuneParams::XGemmParams::compileOptions() const {
+  string s;
+  s += "-DMWG=" + Global::intToString(MWG);
+  s += " -DNWG=" + Global::intToString(NWG);
+  s += " -DKWG=" + Global::intToString(KWG);
+  s += " -DMDIMC=" + Global::intToString(MDIMC);
+  s += " -DNDIMC=" + Global::intToString(NDIMC);
+  s += " -DMDIMA=" + Global::intToString(MDIMA);
+  s += " -DNDIMB=" + Global::intToString(NDIMB);
+  s += " -DKWI=" + Global::intToString(KWI);
+  s += " -DVWM=" + Global::intToString(VWM);
+  s += " -DVWN=" + Global::intToString(VWN);
+  s += " -DSTRM=" + Global::intToString(STRM);
+  s += " -DSTRN=" + Global::intToString(STRN);
+  s += " -DSA=" + Global::intToString(SA);
+  s += " -DSB=" + Global::intToString(SB);
+  return s;
+}
+void OpenCLTuneParams::XGemmParams::fillFromDesc(const string& fileName, const string& desc) {
+  map<string,int> kvs = readDescKeyValues(fileName, desc);
+  MWG = getInt(kvs,"MWG",MWG);
+  NWG = getInt(kvs,"NWG",NWG);
+  KWG = getInt(kvs,"KWG",KWG);
+  MDIMC = getInt(kvs,"MDIMC",MDIMC);
+  NDIMC = getInt(kvs,"NDIMC",NDIMC);
+  MDIMA = getInt(kvs,"MDIMA",MDIMA);
+  NDIMB = getInt(kvs,"NDIMB",NDIMB);
+  KWI = getInt(kvs,"KWI",KWI);
+  VWM = getInt(kvs,"VWM",VWM);
+  VWN = getInt(kvs,"VWN",VWN);
+  STRM = getInt(kvs,"STRM",STRM);
+  STRN = getInt(kvs,"STRN",STRN);
+  SA = getInt(kvs,"SA",SA);
+  SB = getInt(kvs,"SB",SB);
+}
+bool OpenCLTuneParams::XGemmParams::isValid() const {
+  if(MWG <= 0) return false;
+  if(NWG <= 0) return false;
+  if(KWG <= 0) return false;
+  if(MDIMC <= 0) return false;
+  if(NDIMC <= 0) return false;
+  if(MDIMA <= 0) return false;
+  if(NDIMB <= 0) return false;
+  if(KWI <= 0) return false;
+  if(VWM <= 0) return false;
+  if(VWN <= 0) return false;
+  if(STRM < 0 || STRM > 1) return false;
+  if(STRN < 0 || STRN > 1) return false;
+  if(SA < 0 || SA > 1) return false;
+  if(SB < 0 || SB > 1) return false;
+  if(!isMultipleOf(KWG,KWI)) return false;
+  if(!isMultipleOf(MWG,MDIMC*VWM)) return false;
+  if(!isMultipleOf(NWG,NDIMC*VWN)) return false;
+  if(!isMultipleOf(MWG,MDIMA*VWM)) return false;
+  if(!isMultipleOf(NWG,NDIMB*VWN)) return false;
+  if(!isMultipleOf(KWG,VWM)) return false;
+  if(!isMultipleOf(KWG,MDIMC*NDIMC/MDIMA)) return false;
+  if(!isMultipleOf(KWG,MDIMC*NDIMC/NDIMB)) return false;
+  return true;
+}
+bool OpenCLTuneParams::XGemmParams::isSimple() const {
+  if(MDIMC != MDIMA) return false;
+  if(NDIMC != NDIMB) return false;
+  if(SA != SB) return false;
+  if(VWM != VWN) return false;
+  if(MWG != NWG) return false;
+  return true;
+}
 
 string OpenCLTuneParams::Conv3x3Params::desc() const {
   string s;
@@ -120,7 +206,6 @@ string OpenCLTuneParams::Conv3x3Params::desc() const {
   s += " OUTTILE_YSIZE=" + Global::intToString(OUTTILE_YSIZE);
   s += " transLocalSize0=" + Global::intToString(transLocalSize0);
   s += " transLocalSize1=" + Global::intToString(transLocalSize1);
-  s += " transLocalSize2=" + Global::intToString(transLocalSize2);
   s += " untransLocalSize0=" + Global::intToString(untransLocalSize0);
   s += " untransLocalSize1=" + Global::intToString(untransLocalSize1);
   s += " untransLocalSize2=" + Global::intToString(untransLocalSize2);
@@ -130,7 +215,6 @@ string OpenCLTuneParams::Conv3x3Params::transDesc() const {
   string s;
   s += " transLocalSize0=" + Global::intToString(transLocalSize0);
   s += " transLocalSize1=" + Global::intToString(transLocalSize1);
-  s += " transLocalSize2=" + Global::intToString(transLocalSize2);
   return s;
 }
 string OpenCLTuneParams::Conv3x3Params::untransDesc() const {
@@ -157,7 +241,6 @@ void OpenCLTuneParams::Conv3x3Params::fillFromDesc(const string& fileName, const
   OUTTILE_YSIZE = getInt(kvs,"OUTTILE_YSIZE",OUTTILE_YSIZE);
   transLocalSize0 = getInt(kvs,"transLocalSize0",transLocalSize0);
   transLocalSize1 = getInt(kvs,"transLocalSize1",transLocalSize1);
-  transLocalSize2 = getInt(kvs,"transLocalSize2",transLocalSize2);
   untransLocalSize0 = getInt(kvs,"untransLocalSize0",untransLocalSize0);
   untransLocalSize1 = getInt(kvs,"untransLocalSize1",untransLocalSize1);
   untransLocalSize2 = getInt(kvs,"untransLocalSize2",untransLocalSize2);
@@ -165,12 +248,11 @@ void OpenCLTuneParams::Conv3x3Params::fillFromDesc(const string& fileName, const
 bool OpenCLTuneParams::Conv3x3Params::isValid() const {
   if(transLocalSize0 <= 0) return false;
   if(transLocalSize1 <= 0) return false;
-  if(transLocalSize2 <= 0) return false;
   if(untransLocalSize0 <= 0) return false;
   if(untransLocalSize1 <= 0) return false;
   if(untransLocalSize2 <= 0) return false;
 
-  if(transLocalSize0 * transLocalSize1 * transLocalSize2 > 1024) return false;
+  if(transLocalSize0 * transLocalSize1 > 1024) return false;
   if(untransLocalSize0 * untransLocalSize1 * untransLocalSize2 > 1024) return false;
 
   //Currently, the only supported winograd tile sizes
@@ -190,7 +272,6 @@ string OpenCLTuneParams::Conv5x5Params::desc() const {
   s += " OUTTILE_YSIZE=" + Global::intToString(OUTTILE_YSIZE);
   s += " transLocalSize0=" + Global::intToString(transLocalSize0);
   s += " transLocalSize1=" + Global::intToString(transLocalSize1);
-  s += " transLocalSize2=" + Global::intToString(transLocalSize2);
   s += " untransLocalSize0=" + Global::intToString(untransLocalSize0);
   s += " untransLocalSize1=" + Global::intToString(untransLocalSize1);
   s += " untransLocalSize2=" + Global::intToString(untransLocalSize2);
@@ -200,7 +281,6 @@ string OpenCLTuneParams::Conv5x5Params::transDesc() const {
   string s;
   s += " transLocalSize0=" + Global::intToString(transLocalSize0);
   s += " transLocalSize1=" + Global::intToString(transLocalSize1);
-  s += " transLocalSize2=" + Global::intToString(transLocalSize2);
   return s;
 }
 string OpenCLTuneParams::Conv5x5Params::untransDesc() const {
@@ -227,7 +307,6 @@ void OpenCLTuneParams::Conv5x5Params::fillFromDesc(const string& fileName, const
   OUTTILE_YSIZE = getInt(kvs,"OUTTILE_YSIZE",OUTTILE_YSIZE);
   transLocalSize0 = getInt(kvs,"transLocalSize0",transLocalSize0);
   transLocalSize1 = getInt(kvs,"transLocalSize1",transLocalSize1);
-  transLocalSize2 = getInt(kvs,"transLocalSize2",transLocalSize2);
   untransLocalSize0 = getInt(kvs,"untransLocalSize0",untransLocalSize0);
   untransLocalSize1 = getInt(kvs,"untransLocalSize1",untransLocalSize1);
   untransLocalSize2 = getInt(kvs,"untransLocalSize2",untransLocalSize2);
@@ -235,12 +314,11 @@ void OpenCLTuneParams::Conv5x5Params::fillFromDesc(const string& fileName, const
 bool OpenCLTuneParams::Conv5x5Params::isValid() const {
   if(transLocalSize0 <= 0) return false;
   if(transLocalSize1 <= 0) return false;
-  if(transLocalSize2 <= 0) return false;
   if(untransLocalSize0 <= 0) return false;
   if(untransLocalSize1 <= 0) return false;
   if(untransLocalSize2 <= 0) return false;
 
-  if(transLocalSize0 * transLocalSize1 * transLocalSize2 > 1024) return false;
+  if(transLocalSize0 * transLocalSize1 > 1024) return false;
   if(untransLocalSize0 * untransLocalSize1 * untransLocalSize2 > 1024) return false;
 
   //Currently, the only supported winograd tile sizes
@@ -321,7 +399,7 @@ bool OpenCLTuneParams::TransposeParams::isValid() const {
 
 
 bool OpenCLTuneParams::isValid() const {
-  return xGemmDirect.isValid() && conv3x3.isValid() && conv5x5.isValid() && gPool.isValid() && transpose.isValid();
+  return xGemmDirect.isValid() && xGemm.isValid() && conv3x3.isValid() && conv5x5.isValid() && gPool.isValid() && transpose.isValid();
 }
 
 bool OpenCLTuneParams::operator==(const OpenCLTuneParams& other) const {
@@ -330,8 +408,8 @@ bool OpenCLTuneParams::operator==(const OpenCLTuneParams& other) const {
   return std::memcmp(this,&other,sizeof(OpenCLTuneParams)) == 0;
 }
 
-
-static const char* TUNEPARAMS_VERSION_LINE = "VERSION=5";
+static const int TUNER_VERSION = 6;
+static const char* TUNEPARAMS_VERSION_LINE = "VERSION=6";
 void OpenCLTuneParams::save(const string& filename, const OpenCLTuneParams& config) {
   ofstream out(filename);
   if(out.fail())
@@ -339,6 +417,8 @@ void OpenCLTuneParams::save(const string& filename, const OpenCLTuneParams& conf
   out << TUNEPARAMS_VERSION_LINE << "\n";
   out << "#xGemmDirect" << "\n";
   out << config.xGemmDirect.desc() << "\n";
+  out << "#xGemm" << "\n";
+  out << config.xGemm.desc() << "\n";
   out << "#conv3x3" << "\n";
   out << config.conv3x3.desc() << "\n";
   out << "#conv5x5" << "\n";
@@ -366,15 +446,16 @@ OpenCLTuneParams OpenCLTuneParams::load(const string& filename) {
   if(filteredLines[0] != TUNEPARAMS_VERSION_LINE)
     throw IOError("OpenCLTuneParams::load: expected first line to be " + string(TUNEPARAMS_VERSION_LINE) + " in " + filename);
 
-  if(filteredLines.size() != 6)
+  if(filteredLines.size() != 7)
     throw IOError("OpenCLTuneParams::load: unexpected number of parameter lines in file " + filename);
 
   OpenCLTuneParams config;
   config.xGemmDirect.fillFromDesc(filename,filteredLines[1]);
-  config.conv3x3.fillFromDesc(filename,filteredLines[2]);
-  config.conv5x5.fillFromDesc(filename,filteredLines[3]);
-  config.gPool.fillFromDesc(filename,filteredLines[4]);
-  config.transpose.fillFromDesc(filename,filteredLines[5]);
+  config.xGemm.fillFromDesc(filename,filteredLines[2]);
+  config.conv3x3.fillFromDesc(filename,filteredLines[3]);
+  config.conv5x5.fillFromDesc(filename,filteredLines[4]);
+  config.gPool.fillFromDesc(filename,filteredLines[5]);
+  config.transpose.fillFromDesc(filename,filteredLines[6]);
   return config;
 }
 
@@ -391,6 +472,27 @@ static cl_mem randomReadOnlyBuffer(const char* seed, cl_context context, int num
     buf[i] = (float)rand.nextDouble(scale);
   return createReadOnlyBuffer(context,buf);
 }
+static cl_mem randomReadOnly3dPaddedBuffer(
+  const char* seed, cl_context context,
+  int batchSize, int ySize, int ySizePadded, int xSize, int xSizePadded,
+  double scale
+) {
+  vector<float> buf((size_t)batchSize*ySizePadded*xSizePadded);
+  Rand rand(seed);
+  size_t i = 0;
+  for(int n = 0; n<batchSize; n++) {
+    for(int y = 0; y<ySizePadded; y++) {
+      for(int x = 0; x<xSizePadded; x++) {
+        if(y < ySize && x < xSize)
+          buf[i++] = (float)rand.nextDouble(scale);
+        else
+          buf[i++] = 0.0f;
+      }
+    }
+  }
+  return createReadOnlyBuffer(context,buf);
+}
+
 
 
 template<typename T>
@@ -541,6 +643,7 @@ static void testAllConfigs(
 
 #define SETTER(field) std::function<void(OpenCLTuneParams&, int value)>([](OpenCLTuneParams& p, int value){ p.field = value; })
 #define ISVALID(field) std::function<bool(const OpenCLTuneParams&)>([](const OpenCLTuneParams& p){ return p.field.isValid(); })
+#define ISSIMPLE(field) std::function<bool(const OpenCLTuneParams&)>([](const OpenCLTuneParams& p){ return p.field.isSimple(); })
 
 void OpenCLTuner::tune(
   const OpenCLTuneParams& initialConfig,
@@ -592,6 +695,347 @@ void OpenCLTuner::tune(
   }
 
   //=======================================================================================
+  //Tune xGemmDirect
+  {
+    out << "------------------------------------------------------" << endl;
+    out << "Tuning xGemmDirect for 1x1 convolutions and matrix mult" << endl;
+
+    vector<OpenCLTuneParams> configs;
+    configs.push_back(currentConfig);
+    if(full) {
+      addConfigs(configs,SETTER(xGemmDirect.WGD),{8,16,32,64});
+      addConfigs(configs,SETTER(xGemmDirect.MDIMCD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.NDIMCD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.MDIMAD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.NDIMBD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.KWID),{2,8,16});
+      addConfigs(configs,SETTER(xGemmDirect.VWMD),{1,2,4,8});
+      addConfigs(configs,SETTER(xGemmDirect.VWND),{1,2,4,8});
+      addConfigs(configs,SETTER(xGemmDirect.PADA),{1});
+      addConfigs(configs,SETTER(xGemmDirect.PADB),{1});
+    }
+    else {
+      addConfigs(configs,SETTER(xGemmDirect.WGD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.MDIMCD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.NDIMCD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.MDIMAD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.NDIMBD),{8,16,32});
+      addConfigs(configs,SETTER(xGemmDirect.KWID),{2,8});
+      addConfigs(configs,SETTER(xGemmDirect.VWMD),{2,4});
+      addConfigs(configs,SETTER(xGemmDirect.VWND),{2,4});
+      addConfigs(configs,SETTER(xGemmDirect.PADA),{1});
+      addConfigs(configs,SETTER(xGemmDirect.PADB),{1});
+    }
+
+    filterConfigs(configs,ISVALID(xGemmDirect));
+    shuffleConfigs(configs);
+
+    OpenCLTuneParams referenceConfig = currentConfig;
+    referenceConfig.xGemmDirect.WGD = untunedConfig.xGemmDirect.WGD;
+    referenceConfig.xGemmDirect.MDIMCD = untunedConfig.xGemmDirect.MDIMCD;
+    referenceConfig.xGemmDirect.NDIMCD = untunedConfig.xGemmDirect.NDIMCD;
+    referenceConfig.xGemmDirect.MDIMAD = untunedConfig.xGemmDirect.MDIMAD;
+    referenceConfig.xGemmDirect.NDIMBD = untunedConfig.xGemmDirect.NDIMBD;
+    referenceConfig.xGemmDirect.KWID = untunedConfig.xGemmDirect.KWID;
+    referenceConfig.xGemmDirect.VWMD = untunedConfig.xGemmDirect.VWMD;
+    referenceConfig.xGemmDirect.VWND = untunedConfig.xGemmDirect.VWND;
+    referenceConfig.xGemmDirect.PADA = untunedConfig.xGemmDirect.PADA;
+    referenceConfig.xGemmDirect.PADB = untunedConfig.xGemmDirect.PADB;
+    OpenCLTuneParams slightlyTunedConfig = referenceConfig;
+    slightlyTunedConfig.xGemmDirect.MDIMCD = 8;
+    slightlyTunedConfig.xGemmDirect.NDIMCD = 8;
+    slightlyTunedConfig.xGemmDirect.MDIMAD = 8;
+    slightlyTunedConfig.xGemmDirect.NDIMBD = 8;
+    OpenCLTuneParams slightlyTunedConfig2 = slightlyTunedConfig;
+    slightlyTunedConfig2.xGemmDirect.WGD = 16;
+
+    configs.insert(configs.begin(),slightlyTunedConfig2);
+    configs.insert(configs.begin(),slightlyTunedConfig);
+    configs.insert(configs.begin(),currentConfig);
+
+    auto getDesc = [](const OpenCLTuneParams& cfg) { return cfg.xGemmDirect.desc(); };
+
+    auto test = [&](const OpenCLTuneParams& cfg, vector<float>& ret) {
+      OpenCLTuneAccums accums;
+
+      cl_int err;
+      cl_program program;
+      bool compileSuc = tryCompileProgram(
+        "xgemmDirectProgram", context, deviceIdsToUse, OpenCLKernels::xgemmDirect,
+        cfg.xGemmDirect.compileOptions(), program
+      );
+      if(!compileSuc) { accums.bad = true; accums.badErr = CL_BUILD_PROGRAM_FAILURE; return accums; }
+      cl_kernel kernel = clCreateKernel(program, "XgemmDirectBatchedNN", &err);
+      if(err != 0) { accums.bad = true; accums.badErr = err; return accums; }
+
+      int numTilesX = (nnXLen + cfg.conv3x3.OUTTILE_XSIZE - 1) / cfg.conv3x3.OUTTILE_XSIZE;
+      int numTilesY = (nnYLen + cfg.conv3x3.OUTTILE_YSIZE - 1) / cfg.conv3x3.OUTTILE_YSIZE;
+      int numTilesTotal = batchSize * numTilesX * numTilesY;
+
+      int inTileXSize = cfg.conv3x3.INTILE_XSIZE;
+      int inTileYSize = cfg.conv3x3.INTILE_YSIZE;
+      int inTileXYSize = inTileXSize * inTileYSize;
+
+      int maxChannels = model->maxConvChannels(3,3);
+      maxChannels = std::max(model->trunk.trunkNumChannels,maxChannels);
+      maxChannels = std::max(model->trunk.midNumChannels,maxChannels);
+      maxChannels = std::max(model->trunk.regularNumChannels,maxChannels);
+      maxChannels = std::max(model->trunk.gpoolNumChannels,maxChannels);
+
+      int ioNumFloats = numTilesTotal * maxChannels * inTileXYSize;
+      int filterNumFloats = maxChannels * maxChannels * inTileXYSize;
+      cl_mem input = randomReadOnlyBuffer("tuneXGemmDirect3x3Input", context, ioNumFloats, 1.0);
+      cl_mem filter = randomReadOnlyBuffer("tuneXGemmDirect3x3Filter", context, filterNumFloats, 1.0 / sqrt(maxChannels * 3 * 3));
+      cl_mem output = createReadWriteBuffer(context, ioNumFloats);
+
+      const int reps = 6;
+      for(int i = 0; i<reps; i++) {
+        int inChannels;
+        int outChannels;
+        double weight;
+        switch(i) {
+        //Weight 0 on first kernel call to warm up
+        case 0: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.midNumChannels; weight = 0; break;
+        case 1: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.midNumChannels; weight = 1; break;
+        case 2: inChannels = model->trunk.midNumChannels; outChannels = model->trunk.trunkNumChannels; weight = 1; break;
+        case 3: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.regularNumChannels; weight = 0.2; break;
+        case 4: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.gpoolNumChannels; weight = 0.2; break;
+        case 5: inChannels = maxChannels; outChannels = maxChannels; weight = 1; break;
+        default: ASSERT_UNREACHABLE; break;
+        }
+
+        cl_event event;
+        err = doBatchedXGemmDirect_KM_KN_NM(
+          kernel,
+          commandQueue,
+          cfg,
+          numTilesTotal, outChannels, inChannels,
+          input, filter, output,
+          inTileXYSize,
+          &event
+        );
+
+        accums.countResultAndFreeEvent(err,event,weight);
+        if(accums.bad)
+          break;
+      }
+
+      if(accums.bad)
+        ret.assign(ioNumFloats,0.0);
+      else
+        blockingReadBuffer(commandQueue, output, ioNumFloats, ret);
+
+      clReleaseMemObject(input);
+      clReleaseMemObject(filter);
+      clReleaseMemObject(output);
+
+      clReleaseKernel(kernel);
+      clReleaseProgram(program);
+
+      return accums;
+    };
+
+    testAllConfigs(
+      configs,
+      currentConfig,
+      referenceConfig,
+      out,
+      std::function<string(const OpenCLTuneParams& cfg)>(getDesc),
+      std::function<OpenCLTuneAccums(const OpenCLTuneParams& cfg, vector<float>& ret)>(test),
+      handleBestSoFar
+    );
+  }
+
+  //=======================================================================================
+  //Tune xGemm
+  {
+    out << "------------------------------------------------------" << endl;
+    out << "Tuning xGemm for convolutions" << endl;
+
+    vector<OpenCLTuneParams> configs;
+    configs.push_back(currentConfig);
+    if(full) {
+      addConfigs(configs,SETTER(xGemm.MWG),{8,16,32,64,128});
+      addConfigs(configs,SETTER(xGemm.NWG),{8,16,32,64,128});
+      addConfigs(configs,SETTER(xGemm.KWG),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.MDIMC),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.NDIMC),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.MDIMA),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.NDIMB),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.KWI),{2,8});
+      addConfigs(configs,SETTER(xGemm.VWM),{1,2,4,8});
+      addConfigs(configs,SETTER(xGemm.VWN),{1,2,4,8});
+      addConfigs(configs,SETTER(xGemm.STRM),{0});
+      addConfigs(configs,SETTER(xGemm.STRN),{0});
+      addConfigs(configs,SETTER(xGemm.SA),{0,1});
+      addConfigs(configs,SETTER(xGemm.SB),{0,1});
+      filterConfigs(configs,ISVALID(xGemm));
+    }
+    else {
+      addConfigs(configs,SETTER(xGemm.MWG),{16,32,64});
+      addConfigs(configs,SETTER(xGemm.NWG),{16,32,64});
+      addConfigs(configs,SETTER(xGemm.KWG),{16,32});
+      addConfigs(configs,SETTER(xGemm.MDIMC),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.NDIMC),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.MDIMA),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.NDIMB),{8,16,32});
+      addConfigs(configs,SETTER(xGemm.KWI),{2});
+      addConfigs(configs,SETTER(xGemm.VWM),{2,4});
+      addConfigs(configs,SETTER(xGemm.VWN),{2,4});
+      addConfigs(configs,SETTER(xGemm.STRM),{0});
+      addConfigs(configs,SETTER(xGemm.STRN),{0});
+      addConfigs(configs,SETTER(xGemm.SA),{0,1});
+      addConfigs(configs,SETTER(xGemm.SB),{0,1});
+      filterConfigs(configs,ISVALID(xGemm));
+      filterConfigs(configs,ISSIMPLE(xGemm));
+    }
+
+    shuffleConfigs(configs);
+
+    OpenCLTuneParams referenceConfig = currentConfig;
+    referenceConfig.xGemm.MWG = untunedConfig.xGemm.MWG;
+    referenceConfig.xGemm.NWG = untunedConfig.xGemm.NWG;
+    referenceConfig.xGemm.KWG = untunedConfig.xGemm.KWG;
+    referenceConfig.xGemm.MDIMC = untunedConfig.xGemm.MDIMC;
+    referenceConfig.xGemm.NDIMC = untunedConfig.xGemm.NDIMC;
+    referenceConfig.xGemm.MDIMA = untunedConfig.xGemm.MDIMA;
+    referenceConfig.xGemm.NDIMB = untunedConfig.xGemm.NDIMB;
+    referenceConfig.xGemm.KWI = untunedConfig.xGemm.KWI;
+    referenceConfig.xGemm.VWM = untunedConfig.xGemm.VWM;
+    referenceConfig.xGemm.VWN = untunedConfig.xGemm.VWN;
+    referenceConfig.xGemm.STRM = untunedConfig.xGemm.STRM;
+    referenceConfig.xGemm.STRN = untunedConfig.xGemm.STRN;
+    referenceConfig.xGemm.SA = untunedConfig.xGemm.SA;
+    referenceConfig.xGemm.SB = untunedConfig.xGemm.SB;
+
+    OpenCLTuneParams slightlyTunedConfig = referenceConfig;
+    slightlyTunedConfig.xGemm.MDIMC = 8;
+    slightlyTunedConfig.xGemm.NDIMC = 8;
+    slightlyTunedConfig.xGemm.MDIMA = 8;
+    slightlyTunedConfig.xGemm.NDIMB = 8;
+    OpenCLTuneParams slightlyTunedConfig2 = slightlyTunedConfig;
+    slightlyTunedConfig2.xGemm.MWG = 16;
+    slightlyTunedConfig2.xGemm.NWG = 16;
+    slightlyTunedConfig2.xGemm.KWG = 16;
+
+    configs.insert(configs.begin(),slightlyTunedConfig2);
+    configs.insert(configs.begin(),slightlyTunedConfig);
+    configs.insert(configs.begin(),currentConfig);
+
+    auto getDesc = [](const OpenCLTuneParams& cfg) { return cfg.xGemm.desc(); };
+
+    auto test = [&](const OpenCLTuneParams& cfg, vector<float>& ret) {
+      OpenCLTuneAccums accums;
+
+      cl_int err;
+      cl_program program;
+      bool compileSuc = tryCompileProgram(
+        "xgemmProgram", context, deviceIdsToUse, OpenCLKernels::xgemm,
+        cfg.xGemm.compileOptions(), program
+      );
+      if(!compileSuc) { accums.bad = true; accums.badErr = CL_BUILD_PROGRAM_FAILURE; return accums; }
+      cl_kernel kernel = clCreateKernel(program, "XgemmBatched", &err);
+      if(err != 0) { accums.bad = true; accums.badErr = err; return accums; }
+
+      int numTilesX = (nnXLen + cfg.conv3x3.OUTTILE_XSIZE - 1) / cfg.conv3x3.OUTTILE_XSIZE;
+      int numTilesY = (nnYLen + cfg.conv3x3.OUTTILE_YSIZE - 1) / cfg.conv3x3.OUTTILE_YSIZE;
+      int numTilesTotal = batchSize * numTilesX * numTilesY;
+
+      int inTileXSize = cfg.conv3x3.INTILE_XSIZE;
+      int inTileYSize = cfg.conv3x3.INTILE_YSIZE;
+      int inTileXYSize = inTileXSize * inTileYSize;
+
+      int maxChannels = model->maxConvChannels(3,3);
+      maxChannels = std::max(model->trunk.trunkNumChannels,maxChannels);
+      maxChannels = std::max(model->trunk.midNumChannels,maxChannels);
+      maxChannels = std::max(model->trunk.regularNumChannels,maxChannels);
+      maxChannels = std::max(model->trunk.gpoolNumChannels,maxChannels);
+
+      int numTilesTotalPadded = roundUpToMultiple(numTilesTotal,cfg.xGemm.MWG);
+      int maxChannelsPadded = roundUpToMultiple(maxChannels,std::max(cfg.xGemm.NWG,cfg.xGemm.KWG));
+
+      int ioNumFloats = numTilesTotalPadded * maxChannelsPadded * inTileXYSize;
+      cl_mem input = randomReadOnly3dPaddedBuffer(
+        "tuneXGemm3x3Input", context, inTileXYSize, maxChannels, maxChannelsPadded, numTilesTotal, numTilesTotalPadded, 1.0);
+      cl_mem filter = randomReadOnly3dPaddedBuffer(
+        "tuneXGemm3x3Filter", context, inTileXYSize, maxChannels, maxChannelsPadded, maxChannels, maxChannelsPadded, 1.0 / sqrt(maxChannels * 3 * 3));
+      cl_mem output = createReadWriteBuffer(context, ioNumFloats);
+
+      const int reps = 6;
+      for(int i = 0; i<reps; i++) {
+        int inChannels;
+        int outChannels;
+        double weight;
+        switch(i) {
+        //Weight 0 on first kernel call to warm up
+        case 0: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.midNumChannels; weight = 0; break;
+        case 1: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.midNumChannels; weight = 1; break;
+        case 2: inChannels = model->trunk.midNumChannels; outChannels = model->trunk.trunkNumChannels; weight = 1; break;
+        case 3: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.regularNumChannels; weight = 0.2; break;
+        case 4: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.gpoolNumChannels; weight = 0.2; break;
+        case 5: inChannels = maxChannels; outChannels = maxChannels; weight = 1; break;
+        default: ASSERT_UNREACHABLE; break;
+        }
+
+        int outChannelsPadded = roundUpToMultiple(outChannels, cfg.xGemm.NWG);
+        int inChannelsPadded = roundUpToMultiple(inChannels, cfg.xGemm.KWG);
+
+        cl_event event;
+        err = doBatchedXGemm_KM_KN_NM(
+          kernel,
+          commandQueue,
+          cfg,
+          numTilesTotalPadded, outChannelsPadded, inChannelsPadded,
+          input, filter, output,
+          inTileXYSize,
+          &event
+        );
+
+        accums.countResultAndFreeEvent(err,event,weight);
+        if(accums.bad)
+          break;
+      }
+
+      if(accums.bad)
+        ret.assign(ioNumFloats,0.0);
+      else
+        blockingReadBuffer(commandQueue, output, ioNumFloats, ret);
+
+      //Compact ret down to only what we were supposed to get, without padding
+      {
+        int i = 0;
+        for(int n = 0; n<inTileXYSize; n++) {
+          for(int y = 0; y<maxChannels; y++) {
+            for(int x = 0; x<numTilesTotal; x++) {
+              ret[i++] = ret[x + numTilesTotalPadded * (y + maxChannelsPadded * n)];
+            }
+          }
+        }
+        ret.resize(inTileXYSize * maxChannels * numTilesTotal);
+      }
+
+      clReleaseMemObject(input);
+      clReleaseMemObject(filter);
+      clReleaseMemObject(output);
+
+      clReleaseKernel(kernel);
+      clReleaseProgram(program);
+
+      return accums;
+    };
+
+    testAllConfigs(
+      configs,
+      currentConfig,
+      referenceConfig,
+      out,
+      std::function<string(const OpenCLTuneParams& cfg)>(getDesc),
+      std::function<OpenCLTuneAccums(const OpenCLTuneParams& cfg, vector<float>& ret)>(test),
+      handleBestSoFar
+    );
+  }
+
+  //=======================================================================================
   //Tune convolution transform
   {
     out << "------------------------------------------------------" << endl;
@@ -600,14 +1044,12 @@ void OpenCLTuner::tune(
     vector<OpenCLTuneParams> configs;
     configs.push_back(currentConfig);
     if(full) {
-      addConfigs(configs,SETTER(conv3x3.transLocalSize0),{1,2,4,8,16,32,64});
+      addConfigs(configs,SETTER(conv3x3.transLocalSize0),{1,2,4,8,16,32,64,128});
       addConfigs(configs,SETTER(conv3x3.transLocalSize1),{1,2,4,8,16,32,64});
-      addConfigs(configs,SETTER(conv3x3.transLocalSize2),{1,2,4,8,16,32,64});
     }
     else {
-      addConfigs(configs,SETTER(conv3x3.transLocalSize0),{1,2,4,8,16,32});
+      addConfigs(configs,SETTER(conv3x3.transLocalSize0),{1,2,4,8,16,32,64,128});
       addConfigs(configs,SETTER(conv3x3.transLocalSize1),{1,2,4,8,16,32});
-      addConfigs(configs,SETTER(conv3x3.transLocalSize2),{1,2,4,8,16,32});
     }
 
     filterConfigs(configs,ISVALID(conv3x3));
@@ -617,7 +1059,6 @@ void OpenCLTuner::tune(
     OpenCLTuneParams referenceConfig = currentConfig;
     referenceConfig.conv3x3.transLocalSize0 = untunedConfig.conv3x3.transLocalSize0;
     referenceConfig.conv3x3.transLocalSize1 = untunedConfig.conv3x3.transLocalSize1;
-    referenceConfig.conv3x3.transLocalSize2 = untunedConfig.conv3x3.transLocalSize2;
 
     auto getDesc = [](const OpenCLTuneParams& cfg) { return cfg.conv3x3.transDesc(); };
 
@@ -649,7 +1090,7 @@ void OpenCLTuner::tune(
       maxChannels = std::max(model->trunk.gpoolNumChannels,maxChannels);
 
       int inputNumFloats = batchSize * nnXLen * nnYLen * maxChannels;
-      int outputNumFloats = numTilesTotal * maxChannels * inTileXSize * inTileYSize;
+      int outputNumFloats = roundUpToMultiple(numTilesTotal,cfg.xGemm.MWG) * roundUpToMultiple(maxChannels,cfg.xGemm.KWG) * inTileXSize * inTileYSize;
       cl_mem input = randomReadOnlyBuffer("tune3x3TransInput", context, inputNumFloats, 1.0);
       cl_mem output = createReadWriteBuffer(context, outputNumFloats);
 
@@ -678,9 +1119,9 @@ void OpenCLTuner::tune(
           commandQueue,
           cfg,
           input,output,
-          batchSize,nnXLen,nnYLen,
-          numTilesX,numTilesY,
-          inChannels,
+          nnXLen,nnYLen,
+          batchSize,numTilesX,numTilesY,cfg.xGemm.MWG,
+          inChannels,cfg.xGemm.KWG,
           convSize,
           &event
         );
@@ -773,7 +1214,7 @@ void OpenCLTuner::tune(
       maxChannels = std::max(model->trunk.regularNumChannels,maxChannels);
       maxChannels = std::max(model->trunk.gpoolNumChannels,maxChannels);
 
-      int inputNumFloats = numTilesTotal * maxChannels * inTileXSize * inTileYSize;
+      int inputNumFloats = roundUpToMultiple(numTilesTotal,cfg.xGemm.MWG) * roundUpToMultiple(maxChannels,cfg.xGemm.NWG) * inTileXSize * inTileYSize;
       int outputNumFloats = batchSize * nnXLen * nnYLen * maxChannels;
       cl_mem input = randomReadOnlyBuffer("tune3x3UntransInput", context, inputNumFloats, 1.0);
       cl_mem output = createReadWriteBuffer(context, outputNumFloats);
@@ -803,9 +1244,9 @@ void OpenCLTuner::tune(
           commandQueue,
           cfg,
           input,output,
-          batchSize,nnXLen,nnYLen,
-          numTilesX,numTilesY,
-          outChannels,
+          nnXLen,nnYLen,
+          batchSize,numTilesX,numTilesY,cfg.xGemm.MWG,
+          outChannels,cfg.xGemm.NWG,
           convSize,
           &event
         );
@@ -1053,161 +1494,9 @@ void OpenCLTuner::tune(
   }
 
 
-  //=======================================================================================
-  //Tune xGemmDirect
-  {
-    out << "------------------------------------------------------" << endl;
-    out << "Tuning xGemmDirect for convolutions" << endl;
-
-    vector<OpenCLTuneParams> configs;
-    configs.push_back(currentConfig);
-    if(full) {
-      addConfigs(configs,SETTER(xGemmDirect.WGD),{8,16,32,64});
-      addConfigs(configs,SETTER(xGemmDirect.MDIMCD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.NDIMCD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.MDIMAD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.NDIMBD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.KWID),{2,8,16});
-      addConfigs(configs,SETTER(xGemmDirect.VWMD),{1,2,4,8});
-      addConfigs(configs,SETTER(xGemmDirect.VWND),{1,2,4,8});
-      addConfigs(configs,SETTER(xGemmDirect.PADA),{1});
-      addConfigs(configs,SETTER(xGemmDirect.PADB),{1});
-    }
-    else {
-      addConfigs(configs,SETTER(xGemmDirect.WGD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.MDIMCD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.NDIMCD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.MDIMAD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.NDIMBD),{8,16,32});
-      addConfigs(configs,SETTER(xGemmDirect.KWID),{2,8});
-      addConfigs(configs,SETTER(xGemmDirect.VWMD),{2,4});
-      addConfigs(configs,SETTER(xGemmDirect.VWND),{2,4});
-      addConfigs(configs,SETTER(xGemmDirect.PADA),{1});
-      addConfigs(configs,SETTER(xGemmDirect.PADB),{1});
-    }
-
-    filterConfigs(configs,ISVALID(xGemmDirect));
-    shuffleConfigs(configs);
-
-    OpenCLTuneParams referenceConfig = currentConfig;
-    referenceConfig.xGemmDirect.WGD = untunedConfig.xGemmDirect.WGD;
-    referenceConfig.xGemmDirect.MDIMCD = untunedConfig.xGemmDirect.MDIMCD;
-    referenceConfig.xGemmDirect.NDIMCD = untunedConfig.xGemmDirect.NDIMCD;
-    referenceConfig.xGemmDirect.MDIMAD = untunedConfig.xGemmDirect.MDIMAD;
-    referenceConfig.xGemmDirect.NDIMBD = untunedConfig.xGemmDirect.NDIMBD;
-    referenceConfig.xGemmDirect.KWID = untunedConfig.xGemmDirect.KWID;
-    referenceConfig.xGemmDirect.VWMD = untunedConfig.xGemmDirect.VWMD;
-    referenceConfig.xGemmDirect.VWND = untunedConfig.xGemmDirect.VWND;
-    referenceConfig.xGemmDirect.PADA = untunedConfig.xGemmDirect.PADA;
-    referenceConfig.xGemmDirect.PADB = untunedConfig.xGemmDirect.PADB;
-    OpenCLTuneParams slightlyTunedConfig = referenceConfig;
-    slightlyTunedConfig.xGemmDirect.MDIMCD = 8;
-    slightlyTunedConfig.xGemmDirect.NDIMCD = 8;
-    slightlyTunedConfig.xGemmDirect.MDIMAD = 8;
-    slightlyTunedConfig.xGemmDirect.NDIMBD = 8;
-    OpenCLTuneParams slightlyTunedConfig2 = slightlyTunedConfig;
-    slightlyTunedConfig2.xGemmDirect.WGD = 16;
-
-    configs.insert(configs.begin(),slightlyTunedConfig2);
-    configs.insert(configs.begin(),slightlyTunedConfig);
-    configs.insert(configs.begin(),currentConfig);
-
-    auto getDesc = [](const OpenCLTuneParams& cfg) { return cfg.xGemmDirect.desc(); };
-
-    auto test = [&](const OpenCLTuneParams& cfg, vector<float>& ret) {
-      OpenCLTuneAccums accums;
-
-      cl_int err;
-      cl_program program;
-      bool compileSuc = tryCompileProgram(
-        "xgemmDirectProgram", context, deviceIdsToUse, OpenCLKernels::xgemmDirect,
-        cfg.xGemmDirect.compileOptions(), program
-      );
-      if(!compileSuc) { accums.bad = true; accums.badErr = CL_BUILD_PROGRAM_FAILURE; return accums; }
-      cl_kernel kernel = clCreateKernel(program, "XgemmDirectBatchedNN", &err);
-      if(err != 0) { accums.bad = true; accums.badErr = err; return accums; }
-
-      int numTilesX = (nnXLen + cfg.conv3x3.OUTTILE_XSIZE - 1) / cfg.conv3x3.OUTTILE_XSIZE;
-      int numTilesY = (nnYLen + cfg.conv3x3.OUTTILE_YSIZE - 1) / cfg.conv3x3.OUTTILE_YSIZE;
-      int numTilesTotal = batchSize * numTilesX * numTilesY;
-
-      int inTileXSize = cfg.conv3x3.INTILE_XSIZE;
-      int inTileYSize = cfg.conv3x3.INTILE_YSIZE;
-
-      int maxChannels = model->maxConvChannels(3,3);
-      maxChannels = std::max(model->trunk.trunkNumChannels,maxChannels);
-      maxChannels = std::max(model->trunk.midNumChannels,maxChannels);
-      maxChannels = std::max(model->trunk.regularNumChannels,maxChannels);
-      maxChannels = std::max(model->trunk.gpoolNumChannels,maxChannels);
-
-      int ioNumFloats = numTilesTotal * maxChannels * inTileXSize * inTileYSize;
-      int filterNumFloats = maxChannels * maxChannels * inTileXSize * inTileYSize;
-      cl_mem input = randomReadOnlyBuffer("tuneXGemm3x3Input", context, ioNumFloats, 1.0);
-      cl_mem filter = randomReadOnlyBuffer("tuneXGemm3x3Filter", context, filterNumFloats, 1.0 / sqrt(maxChannels * 3 * 3));
-      cl_mem output = createReadWriteBuffer(context, ioNumFloats);
-
-      const int reps = 6;
-      for(int i = 0; i<reps; i++) {
-        int inChannels;
-        int outChannels;
-        double weight;
-        switch(i) {
-        //Weight 0 on first kernel call to warm up
-        case 0: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.midNumChannels; weight = 0; break;
-        case 1: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.midNumChannels; weight = 1; break;
-        case 2: inChannels = model->trunk.midNumChannels; outChannels = model->trunk.trunkNumChannels; weight = 1; break;
-        case 3: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.regularNumChannels; weight = 0.2; break;
-        case 4: inChannels = model->trunk.trunkNumChannels; outChannels = model->trunk.gpoolNumChannels; weight = 0.2; break;
-        case 5: inChannels = maxChannels; outChannels = maxChannels; weight = 1; break;
-        default: ASSERT_UNREACHABLE; break;
-        }
-
-        cl_event event;
-        err = doBatchedXGemm_KM_KN_MN(
-          kernel,
-          commandQueue,
-          cfg,
-          outChannels, numTilesTotal, inChannels,
-          filter, input, output,
-          inTileXSize * inTileYSize,
-          &event
-        );
-
-        accums.countResultAndFreeEvent(err,event,weight);
-        if(accums.bad)
-          break;
-      }
-
-      if(accums.bad)
-        ret.assign(ioNumFloats,0.0);
-      else
-        blockingReadBuffer(commandQueue, output, ioNumFloats, ret);
-
-      clReleaseMemObject(input);
-      clReleaseMemObject(filter);
-      clReleaseMemObject(output);
-
-      clReleaseKernel(kernel);
-      clReleaseProgram(program);
-
-      return accums;
-    };
-
-    testAllConfigs(
-      configs,
-      currentConfig,
-      referenceConfig,
-      out,
-      std::function<string(const OpenCLTuneParams& cfg)>(getDesc),
-      std::function<OpenCLTuneAccums(const OpenCLTuneParams& cfg, vector<float>& ret)>(test),
-      handleBestSoFar
-    );
-  }
-
   //Copy 5x5 conv parameters over from 3x3 conv parameters
   currentConfig.conv5x5.transLocalSize0 = currentConfig.conv3x3.transLocalSize0;
   currentConfig.conv5x5.transLocalSize1 = currentConfig.conv3x3.transLocalSize1;
-  currentConfig.conv5x5.transLocalSize2 = currentConfig.conv3x3.transLocalSize2;
   currentConfig.conv5x5.untransLocalSize0 = currentConfig.conv3x3.untransLocalSize0;
   currentConfig.conv5x5.untransLocalSize1 = currentConfig.conv3x3.untransLocalSize1;
   currentConfig.conv5x5.untransLocalSize2 = currentConfig.conv3x3.untransLocalSize2;
@@ -1233,7 +1522,7 @@ string OpenCLTuner::defaultFileName(const string& gpuName, int nnXLen, int nnYLe
     if(contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", c))
       gpuNameForFile += c;
   }
-  return Global::strprintf("tune_gpu%s_x%d_y%d_c%d_mv%d.txt", gpuNameForFile.c_str(), nnXLen, nnYLen, model->trunk.trunkNumChannels,model->version);
+  return Global::strprintf("tune%d_gpu%s_x%d_y%d_c%d_mv%d.txt", TUNER_VERSION, gpuNameForFile.c_str(), nnXLen, nnYLen, model->trunk.trunkNumChannels,model->version);
 }
 
 static OpenCLTuneParams loadFromTunerFile(const string& fileName, Logger* logger) {
