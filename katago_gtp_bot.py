@@ -114,6 +114,10 @@ class KataGTPBot( Agent):
                     g_response_event.set()
         elif line.startswith('info '): # kata-analyze response
             self._katagoCmd( 'stop')
+            rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% ' fuck, lower case w and no %
+            rstr = rstr.split()[1] # '44.37%'
+            rstr = rstr[:-1] # '44.37'
+            g_win_prob = float(rstr)
             rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 ' fuck, lower case s
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
