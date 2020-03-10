@@ -114,11 +114,11 @@ class KataGTPBot( Agent):
                     g_response_event.set()
         elif line.startswith('info '): # kata-analyze response
             self._katagoCmd( 'stop')
-            rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% ' fuck, lower case w and no %
+            rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% '
             rstr = rstr.split()[1] # '44.37%'
             rstr = rstr[:-1] # '44.37'
             g_win_prob = float(rstr)
-            rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 ' fuck, lower case s
+            rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 '
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
             rstr = re.findall( r'\s+move\s+[A-Z0-9]+\s+', line)[0] # ' move Q16 '
@@ -205,7 +205,7 @@ class KataGTPBot( Agent):
             print( '>>>>>>>>> clearing event')
             g_response_event.clear()
         g_response = None
-        print( 'katago says: %s' % str(res))
+        print( 'katago select res: %s' % str(res))
         return res
 
     # score endpoint implementation
