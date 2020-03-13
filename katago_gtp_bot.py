@@ -216,6 +216,9 @@ class KataGTPBot( Agent):
         res = None
         p = self.katago_proc
 
+        # Do we want ownership probs per intersection
+        ownership = config.get( 'ownership', 'true')
+
         # Set komi
         komi = config.get( 'komi', 7.5)
         self.set_komi( komi)
@@ -231,7 +234,7 @@ class KataGTPBot( Agent):
             color = 'b' if color == 'w' else 'w'
 
         # Ask for the ownership info
-        self._katagoCmd( 'kata-analyze 100 ownership true')
+        self._katagoCmd( 'kata-analyze 100 ownership %s' % ownership)
         # Hang until the info comes back
         print( '>>>>>>>>> waiting for score')
         success = g_response_event.wait( MOVE_TIMEOUT)
@@ -241,8 +244,10 @@ class KataGTPBot( Agent):
             return None
         print( 'score response:\n' + str(g_response))
         if g_response:
-            probs = g_response.split( 'ownership')[1]
-            probs = probs.split()
+            probs = []
+            if ownership == 'true':
+                probs = g_response.split( 'ownership')[1]
+                probs = probs.split()
             res = probs
             print( '>>>>>>>>> clearing event')
             g_response_event.clear()
