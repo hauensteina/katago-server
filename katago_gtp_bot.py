@@ -194,16 +194,17 @@ class KataGTPBot( Agent):
         # Hang until the move comes back
         print( '>>>>>>>>> waiting')
         success = g_response_event.wait( MOVE_TIMEOUT)
+        g_response_event.clear()
         if not success: # I guess katago died
-            print( 'error: katago response timeout')
+            print( 'error: katago select response timeout')
             self._error_handler()
             return None
         #time.sleep(2)
         print( 'response: ' + str(g_response))
         if g_response:
             res = g_response
-            print( '>>>>>>>>> clearing event')
-            g_response_event.clear()
+            #print( '>>>>>>>>> clearing event')
+            #g_response_event.clear()
         g_response = None
         print( 'katago select res: %s' % str(res))
         return res
@@ -238,8 +239,9 @@ class KataGTPBot( Agent):
         # Hang until the info comes back
         print( '>>>>>>>>> waiting for score')
         success = g_response_event.wait( MOVE_TIMEOUT)
+        g_response_event.clear()
         if not success: # I guess katago died
-            print( 'error: katago response timeout')
+            print( 'error: katago score response timeout')
             self._error_handler()
             return None
         print( 'score response:\n' + str(g_response))
@@ -249,8 +251,8 @@ class KataGTPBot( Agent):
                 probs = g_response.split( 'ownership')[1]
                 probs = probs.split()
             res = probs
-            print( '>>>>>>>>> clearing event')
-            g_response_event.clear()
+            #print( '>>>>>>>>> clearing event')
+            #g_response_event.clear()
         g_response = None
         print( 'katago says: %s' % str(res))
         return res
