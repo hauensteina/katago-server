@@ -96,11 +96,13 @@ class KataGTPBot( Agent):
         print( 'kata resp: %s' % line)
         if g_win_prob < 0 and 'CHAT:' in line: # Winrate
             print( '<-- ' + line)
-            rstr = re.findall( r'Winrate\s+[0-9.]+%\s+', line)[0] # 'Winrate 44.37% '
+            #rstr = re.findall( r'Winrate\s+[0-9.]+%\s+', line)[0] # 'Winrate 44.37% '
+            rstr = re.findall( r'Winrate\s+[^\s]+\s+', line)[0] # 'Winrate 44.37% '
             rstr = rstr.split()[1] # '44.37%'
             rstr = rstr[:-1] # '44.37'
             g_win_prob = 0.01 * float(rstr)
-            rstr = re.findall( r'ScoreLead\s+[-0-9.]+\s+', line)[0] # 'ScoreLead -7.85 '
+            #rstr = re.findall( r'ScoreLead\s+[-0-9.]+\s+', line)[0] # 'ScoreLead -7.85 '
+            rstr = re.findall( r'ScoreLead\s+[^\s]+\s+', line)[0] # 'ScoreLead -7.85 '
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
         elif  '@@' in line: # Our own logs from KataGo
@@ -114,14 +116,17 @@ class KataGTPBot( Agent):
                     g_response_event.set()
         elif line.startswith('info '): # kata-analyze response
             self._katagoCmd( 'stop')
-            rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% '
+            #rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% '
+            rstr = re.findall( r'winrate\s+[^\s]+\s+', line)[0] # 'winrate 44.37% '
             rstr = rstr.split()[1] # '44.37%'
             rstr = rstr[:-1] # '44.37'
             g_win_prob = float(rstr)
-            rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 '
+            #rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 '
+            rstr = re.findall( r'scoreLead\s+[^\s]+\s+', line)[0] # 'scoreLead -7.85 '
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
-            rstr = re.findall( r'\s+move\s+[A-Z0-9]+\s+', line)[0] # ' move Q16 '
+            #rstr = re.findall( r'\s+move\s+[A-Z0-9]+\s+', line)[0] # ' move Q16 '
+            rstr = re.findall( r'\s+move\s+[^\s]+\s+', line)[0] # ' move Q16 '
             rstr = rstr.split()[1] # 'Q16'
             g_bot_move = rstr
             g_response = line
@@ -194,16 +199,17 @@ class KataGTPBot( Agent):
         # Hang until the move comes back
         print( '>>>>>>>>> waiting')
         success = g_response_event.wait( MOVE_TIMEOUT)
+        g_response_event.clear()
         if not success: # I guess katago died
-            print( 'error: katago response timeout')
+            print( 'error: katago select response timeout')
             self._error_handler()
             return None
         #time.sleep(2)
         print( 'response: ' + str(g_response))
         if g_response:
             res = g_response
-            print( '>>>>>>>>> clearing event')
-            g_response_event.clear()
+            #print( '>>>>>>>>> clearing event')
+            #g_response_event.clear()
         g_response = None
         print( 'katago select res: %s' % str(res))
         return res
@@ -238,8 +244,9 @@ class KataGTPBot( Agent):
         # Hang until the info comes back
         print( '>>>>>>>>> waiting for score')
         success = g_response_event.wait( MOVE_TIMEOUT)
+        g_response_event.clear()
         if not success: # I guess katago died
-            print( 'error: katago response timeout')
+            print( 'error: katago score response timeout')
             self._error_handler()
             return None
         print( 'score response:\n' + str(g_response))
@@ -249,8 +256,8 @@ class KataGTPBot( Agent):
                 probs = g_response.split( 'ownership')[1]
                 probs = probs.split()
             res = probs
-            print( '>>>>>>>>> clearing event')
-            g_response_event.clear()
+            #print( '>>>>>>>>> clearing event')
+            #g_response_event.clear()
         g_response = None
         print( 'katago says: %s' % str(res))
         return res
