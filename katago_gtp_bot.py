@@ -33,6 +33,7 @@ g_response_event = Event()
 g_win_prob = -1
 g_score = 0
 g_bot_move = ''
+g_best_ten = []
 
 MOVE_TIMEOUT = 20 # seconds
 #===========================
@@ -91,11 +92,13 @@ class KataGTPBot( Agent):
         global g_win_prob
         global g_score
         global g_bot_move
+        global g_best_ten
 
         line = katago_response
         print( 'kata resp: %s' % line)
         if g_win_prob < 0 and 'CHAT:' in line: # Winrate
             print( '<-- ' + line)
+            g_best_ten = []
             #rstr = re.findall( r'Winrate\s+[0-9.]+%\s+', line)[0] # 'Winrate 44.37% '
             rstr = re.findall( r'Winrate\s+[^\s]+\s+', line)[0] # 'Winrate 44.37% '
             rstr = rstr.split()[1] # '44.37%'
@@ -114,6 +117,13 @@ class KataGTPBot( Agent):
                 g_response = self._resp2Move( resp)
                 if g_response:
                     g_response_event.set()
+        elif ' PSV ' in line: # Move candidates in descending order of PSV
+            rstr = re.findall( r'PSV\s+[^\s]+\s+', line)[0] # 'PSV 842 '
+            psv = rstr.split()[1]
+            rstr = re.findall( r'^[^\s]+\s+:', line)[0] # 'E6  :'
+            move = rstr.split()[0]
+            #move = self._resp2Move( move)
+            g_best_ten.append( { 'move':move, 'psv':int(psv) })
         elif line.startswith('info '): # kata-analyze response
             self._katagoCmd( 'stop')
             #rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% '
@@ -272,7 +282,8 @@ class KataGTPBot( Agent):
     def diagnostics( self):
         global g_win_prob
         global g_score
-        return { 'winprob': float(g_win_prob), 'score': float(g_score), 'bot_move': g_bot_move }
+        global g_best_ten
+        return { 'winprob': float(g_win_prob), 'score': float(g_score), 'bot_move': g_bot_move, 'best_ten': g_best_ten }
 
     # Turn an idx 0..360 into a move
     #---------------------------------
