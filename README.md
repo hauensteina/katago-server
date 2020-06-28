@@ -112,11 +112,11 @@ CURL testing
 
 Prod:
 
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server/select-move/katago_gtp_bot
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server/select-move/katago_gtp_bot
 
 Dev on marfa:
 
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server_test/select-move/katago_gtp_bot
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server_test/select-move/katago_gtp_bot
 
 Dev local on marfa:
 
