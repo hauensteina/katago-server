@@ -3,8 +3,7 @@ A back end API to ask KataGo for moves
 ===========================================
 AHN, Jan 2020
 
-Used by the heroku app katago-gui.herokuapp.com, which is a separate github repo.
-It is connected to heroku. A push to the master branch will deploy there.
+Try it at https://katagui.herokuapp.com .
 
 katago-gui (the GUI) is a git submodule of katago-server (this repo).
 
