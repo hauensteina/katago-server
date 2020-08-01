@@ -1,5 +1,5 @@
 
-A back end API to ask KataGo for moves
+A Back End API To Ask KataGo For Moves
 ===========================================
 AHN, Jan 2020
 
