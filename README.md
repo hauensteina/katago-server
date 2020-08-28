@@ -1,10 +1,9 @@
 
-A back end API to ask KataGo for moves
+A Back End API To Ask KataGo For Moves
 ===========================================
 AHN, Jan 2020
 
-Used by the heroku app katago-gui.herokuapp.com, which is a separate github repo.
-It is connected to heroku. A push to the master branch will deploy there.
+Try it at https://katagui.herokuapp.com .
 
 katago-gui (the GUI) is a git submodule of katago-server (this repo).
 
@@ -112,11 +111,11 @@ CURL testing
 
 Prod:
 
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server/select-move/katago_gtp_bot
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server/select-move/katago_gtp_bot
 
 Dev on marfa:
 
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://ahaux.com/katago_server_test/select-move/katago_gtp_bot
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server_test/select-move/katago_gtp_bot
 
 Dev local on marfa:
 
