@@ -33,7 +33,7 @@ from encoder_base import get_encoder_by_name
 from scoring import compute_nn_game_result
 
 
-katago_cmd = './katago gtp -model g170-b40c256x2-s3708042240-d967973220.bin.gz -config gtp_ahn_x.cfg '
+katago_cmd = './katago gtp -model g170-b40c256x2-s5095420928-d1229425124.bin.gz -config gtp_ahn_x.cfg '
 katago_gtp_bot = KataGTPBot( katago_cmd.split() )
 
 # Get an app with 'select-move/<botname>' endpoints
