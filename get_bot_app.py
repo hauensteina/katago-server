@@ -51,7 +51,10 @@ def get_bot_app( bot_map):
                 next_move = goboard.Move.resign()
             else:
                 next_move = goboard.Move.play( point_from_coords(move))
-            game_state = game_state.apply_move( next_move)
+            try:    
+                game_state = game_state.apply_move( next_move)
+            except:
+                return jsonify({'error':'select_move(): apply_move() failed'})
             #print_board( game_state.board)
         bot_agent = bot_map[bot_name]
         config = content.get('config',{})
