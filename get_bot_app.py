@@ -44,18 +44,18 @@ def get_bot_app( bot_map):
         board_size = content['board_size']
         game_state = goboard.GameState.new_game( board_size)
         # Replay the game up to this point.
-        for move in content['moves']:
-            if move == 'pass':
-                next_move = goboard.Move.pass_turn()
-            elif move == 'resign':
-                next_move = goboard.Move.resign()
-            else:
-                next_move = goboard.Move.play( point_from_coords(move))
-            try:    
-                game_state = game_state.apply_move( next_move)
-            except:
-                return jsonify({'error':'select_move(): apply_move() failed'})
-            #print_board( game_state.board)
+        # for move in content['moves']:
+        #     if move == 'pass':
+        #         next_move = goboard.Move.pass_turn()
+        #     elif move == 'resign':
+        #         next_move = goboard.Move.resign()
+        #     else:
+        #         next_move = goboard.Move.play( point_from_coords(move))
+        #     try:
+        #         game_state = game_state.apply_move( next_move)
+        #     except:
+        #         return jsonify({'error':'select_move(): apply_move() failed'})
+        #     #print_board( game_state.board)
         bot_agent = bot_map[bot_name]
         config = content.get('config',{})
         bot_move = bot_agent.select_move( game_state, content['moves'], config)
@@ -81,16 +81,16 @@ def get_bot_app( bot_map):
         print( '>>> %s score %s %s' % (dtstr, bot_name, str(content.get('config',{}))))
         board_size = content['board_size']
         game_state = goboard.GameState.new_game( board_size)
-        # Replay the game up to this point.
-        for move in content['moves']:
-            if move == 'pass':
-                next_move = goboard.Move.pass_turn()
-            elif move == 'resign':
-                next_move = goboard.Move.resign()
-            else:
-                next_move = goboard.Move.play( point_from_coords(move))
-            game_state = game_state.apply_move( next_move)
-            #print_board( game_state.board)
+        # # Replay the game up to this point.
+        # for move in content['moves']:
+        #     if move == 'pass':
+        #         next_move = goboard.Move.pass_turn()
+        #     elif move == 'resign':
+        #         next_move = goboard.Move.resign()
+        #     else:
+        #         next_move = goboard.Move.play( point_from_coords(move))
+        #     game_state = game_state.apply_move( next_move)
+        #     #print_board( game_state.board)
         bot_agent = bot_map[bot_name]
         config = content.get('config',{})
         ownership_arr = bot_agent.score( game_state, content['moves'], config)
