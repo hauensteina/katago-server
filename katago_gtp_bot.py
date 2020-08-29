@@ -194,6 +194,8 @@ class KataGTPBot( Agent):
         # Reset the game
         self._katagoCmd( 'clear_board')
 
+        self.set_rules(komi)
+
         # Make the moves
         color = 'b'
         for idx,move in enumerate(moves):
@@ -242,6 +244,8 @@ class KataGTPBot( Agent):
         # Reset the game
         self._katagoCmd( 'clear_board')
 
+        self.set_rules(komi)
+
         # Make the moves
         color = 'b'
         for idx,move in enumerate(moves):
@@ -271,6 +275,16 @@ class KataGTPBot( Agent):
         g_response = None
         print( 'katago says: %s' % str(res))
         return res
+
+    #----------------------------
+    def set_rules( self, komi):
+        # Rules should be jap for integer komi or even komi,
+        # chinese for odd komi
+        rules = 'japanese'
+        if komi != int(komi): # komi == n.5
+            if (komi - 0.5) % 2: # 7.5, not 6.5
+                rules = 'chinese'
+        self._katagoCmd( 'kata-set-rules ' + rules)
 
     #---------------------------
     def set_komi( self, komi):
