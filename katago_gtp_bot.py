@@ -288,6 +288,7 @@ class KataGTPBot( Agent):
 
     #---------------------------
     def set_komi( self, komi):
+        if not komi: komi=0
         print( '>>>>>>>>> komi:%f',komi)
         self._katagoCmd( 'komi %f' % komi)
 
