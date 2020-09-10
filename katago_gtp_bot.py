@@ -280,6 +280,7 @@ class KataGTPBot( Agent):
     def set_rules( self, komi):
         # Rules should be jap for integer komi or even komi,
         # chinese for odd komi
+        if not komi: komi=0
         rules = 'japanese'
         if komi != int(komi): # komi == n.5
             if (komi - 0.5) % 2: # 7.5, not 6.5
