@@ -8,21 +8,27 @@ Try it at https://katagui.herokuapp.com .
 katago-gui (the GUI) is a git submodule of katago-server (this repo).
 
 WARNING: You need the katago weights. Get them with
+
+```
 $ cd katago-server
 $ wget https://github.com/lightvector/KataGo/releases/download/v1.3.1/g170-b20c256x2-s1039565568-d285739972.txt.gz
+```
 
 To start the back end katago for testing, say
-gunicorn katago_server:app --bind 0.0.0.0:2818 -w 1
-
+```
+$ gunicorn katago_server:app --bind 0.0.0.0:2818 -w 1
+```
 The production port is 2819.
 
 For testing, use
+```
 KATAGO_SERVER = 'https://ahaux.com/katago_server_test/'
+```
 in heroku_app.py .
 
 The katago-gui GUI expects the back end at https://ahaux.com/katago_server .
 The apache2 config on ahaux.com (marfa) forwards katago_server to port 2819:
-
+```
 $ cat /etc/apache2/sites-available/ahaux.conf
 <VirtualHost *:443>
     SSLEngine On
@@ -47,6 +53,7 @@ $ cat /etc/apache2/sites-available/ahaux.conf
     </Location>
 
 </VirtualHost>
+```
 
 Point your browser at
 https://katago-gui.herokuapp.com
@@ -55,16 +62,17 @@ Deployment Process for katago-server
 -------------------------------------
 Log into the server (marfa), then:
 
+```
 $ cd /var/www/katago-server
 $ systemctl stop katago-server
 $ git pull origin master
 $ git submodule update --init --recursive
 $ systemctl start katago-server
+```
 
-The service configuration is in
+The service configuration is in `/etc/systemd/system/katago-server.service` :
 
-/etc/systemd/system/katago-server.service:
-
+```
 [Unit]
 Description=katago-server
 After=network.target
@@ -77,11 +85,14 @@ ExecStart=/home/ahauenst/miniconda/envs/venv-dlgo/bin/gunicorn -c /var/www/katag
 
 [Install]
 WantedBy=multi-user.target
+```
 
 Enable the service with
 
+```
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable katago-server
+```
 
 Deployment Process for katago-gui (the Web front end)
 --------------------------------------------------------------
@@ -89,17 +100,21 @@ Deployment Process for katago-gui (the Web front end)
 The heroku push happens through github.
 Log into the server (marfa), then:
 
+```
 $ cd /var/www/katago-server/katago-gui
 $ git pull origin dev
 $ git pull origin master
 << Change the server address to prod in static/main.js >>
 $ git merge dev
 $ git push origin master
+```
 
 Log out of the server.
-On your desktop, do
+In a local terminal, say
 
+```
 $ heroku logs -t --app katago-gui
+```
 
 to see if things are OK.
 
@@ -110,17 +125,17 @@ CURL testing
 ------------------
 
 Prod:
-
+```
 $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server/select-move/katago_gtp_bot
-
+```
 Dev on marfa:
-
+```
 $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server_test/select-move/katago_gtp_bot
-
+```
 Dev local on marfa:
-
+```
 $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2818/select-move/katago_gtp_bot
-
+``
 
 
 === The End ===
