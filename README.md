@@ -135,7 +135,7 @@ $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: applicati
 Dev local on marfa:
 ```
 $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2818/select-move/katago_gtp_bot
-``
+```
 
 
 === The End ===
