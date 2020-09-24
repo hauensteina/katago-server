@@ -42,4 +42,4 @@ app = get_bot_app( {'katago_gtp_bot':katago_gtp_bot} )
 
 #----------------------------
 if __name__ == '__main__':
-    app.run( host='127.0.0.1', port=2818, debug=True)
+    app.run( host='0.0.0.0', port=2818, debug=True)

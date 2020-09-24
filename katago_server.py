@@ -33,7 +33,6 @@ from encoder_base import get_encoder_by_name
 from scoring import compute_nn_game_result
 
 
-# katago_cmd = './katago gtp -model g170e-b10c128-s1141046784-d204142634.txt.gz -config gtp_ahn.cfg '
 katago_cmd = './katago gtp -model g170e-b20c256x2-s5303129600-d1228401921.bin.gz -config gtp_ahn.cfg '
 katago_gtp_bot = KataGTPBot( katago_cmd.split() )
 
@@ -43,4 +42,4 @@ app = get_bot_app( {'katago_gtp_bot':katago_gtp_bot} )
 
 #----------------------------
 if __name__ == '__main__':
-    app.run( host='127.0.0.1', port=2818, debug=True)
+    app.run( host='0.0.0.0', port=2718, debug=True)

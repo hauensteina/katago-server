@@ -99,12 +99,10 @@ class KataGTPBot( Agent):
         if g_win_prob < 0 and 'CHAT:' in line: # Winrate
             print( '<-- ' + line)
             g_best_ten = []
-            #rstr = re.findall( r'Winrate\s+[0-9.]+%\s+', line)[0] # 'Winrate 44.37% '
             rstr = re.findall( r'Winrate\s+[^\s]+\s+', line)[0] # 'Winrate 44.37% '
             rstr = rstr.split()[1] # '44.37%'
             rstr = rstr[:-1] # '44.37'
             g_win_prob = 0.01 * float(rstr)
-            #rstr = re.findall( r'ScoreLead\s+[-0-9.]+\s+', line)[0] # 'ScoreLead -7.85 '
             rstr = re.findall( r'ScoreLead\s+[^\s]+\s+', line)[0] # 'ScoreLead -7.85 '
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
@@ -122,20 +120,16 @@ class KataGTPBot( Agent):
             psv = rstr.split()[1]
             rstr = re.findall( r'^[^\s]+\s+:', line)[0] # 'E6  :'
             move = rstr.split()[0]
-            #move = self._resp2Move( move)
             g_best_ten.append( { 'move':move, 'psv':int(psv) })
         elif line.startswith('info '): # kata-analyze response
             self._katagoCmd( 'stop')
-            #rstr = re.findall( r'winrate\s+[0-9.]+\s+', line)[0] # 'winrate 44.37% '
             rstr = re.findall( r'winrate\s+[^\s]+\s+', line)[0] # 'winrate 44.37% '
             rstr = rstr.split()[1] # '44.37%'
             rstr = rstr[:-1] # '44.37'
             g_win_prob = float(rstr)
-            #rstr = re.findall( r'scoreLead\s+[-0-9.]+\s+', line)[0] # 'scoreLead -7.85 '
             rstr = re.findall( r'scoreLead\s+[^\s]+\s+', line)[0] # 'scoreLead -7.85 '
             rstr = rstr.split()[1] # '-7.85'
             g_score = float(rstr)
-            #rstr = re.findall( r'\s+move\s+[A-Z0-9]+\s+', line)[0] # ' move Q16 '
             rstr = re.findall( r'\s+move\s+[^\s]+\s+', line)[0] # ' move Q16 '
             rstr = rstr.split()[1] # 'Q16'
             g_bot_move = rstr
@@ -193,6 +187,7 @@ class KataGTPBot( Agent):
 
         # Reset the game
         self._katagoCmd( 'clear_board')
+        self._katagoCmd( 'clear_cache')
 
         self.set_rules(komi)
 
