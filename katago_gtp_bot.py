@@ -238,6 +238,7 @@ class KataGTPBot( Agent):
 
         # Reset the game
         self._katagoCmd( 'clear_board')
+        self._katagoCmd( 'clear_cache')
 
         self.set_rules(komi)
 
@@ -249,7 +250,7 @@ class KataGTPBot( Agent):
             color = 'b' if color == 'w' else 'w'
 
         # Ask for the ownership info
-        self._katagoCmd( 'kata-analyze 50 ownership %s' % ownership)
+        self._katagoCmd( 'kata-analyze 100 ownership %s' % ownership)
         # Hang until the info comes back
         print( '>>>>>>>>> waiting for score')
         success = g_response_event.wait( MOVE_TIMEOUT)
