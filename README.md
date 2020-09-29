@@ -3,10 +3,6 @@ A Back End API To Ask KataGo For Moves
 ===========================================
 AHN, Sep 2020
 
-Try it through a front end at https://katagui.herokuapp.com .
-
-The repo for the front end is at https://github.com/hauensteina/katago-gui .
-
 The API is a Flask app, typically running on Ubuntu. Therefore, you probably want 
 to be on a Ubuntu box where the default python is python version 3, which is pretty 
 much standard these days.
@@ -32,6 +28,10 @@ on your network, try this:
 curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://192.168.0.190:2718/select-move/katago_gtp_bot
 ```
 It should return the ten best follow-up moves in descending quality, a score estimate, and a winning probability.
+
+The API is used by a front end at https://katagui.herokuapp.com .
+
+The repo for the front end is at https://github.com/hauensteina/katago-gui .
 
 Production Deployment Process for katago-server
 ---------------------------------------------------------------
