@@ -3,11 +3,11 @@ A Back End API To Ask KataGo For Moves
 ===========================================
 AHN, Sep 2020
 
-The API is a Flask app, typically running on Ubuntu. Therefore, you probably want 
-to be on a Ubuntu box where the default python is python version 3, which is pretty 
-much standard these days.
+The API is a Python Flask app, typically running on Ubuntu. This distribution includes an executable for katago, running
+on 64-bit Ubuntu. You do not have to look for katago elsewhere, but you have to be on a 64-bit Ubuntu box. The default 
+Python has to be Python 3, which is pretty much standard these days.
 
-WARNING: You need the katago weights. Get the weights with
+WARNING: You need the katago weights from elsewhere. Get them with
 ```
 $ cd katago-server
 $ wget https://github.com/lightvector/KataGo/releases/download/v1.4.5/g170e-b20c256x2-s5303129600-d1228401921.bin.gz
@@ -35,7 +35,7 @@ The repo for the front end is at https://github.com/hauensteina/katago-gui .
 
 Production Deployment Process for katago-server
 ---------------------------------------------------------------
-Log into your server, which probably has a strong GPU. Then:
+Log into your server, which hopefully has a strong GPU. Then:
 
 ```
 $ cd /var/www/katago-server
