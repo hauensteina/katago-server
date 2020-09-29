@@ -69,4 +69,14 @@ $ sudo systemctl daemon-reload
 $ sudo systemctl enable katago-server
 ```
 
+The http access and error logs are in `/tmp/kata_access.log` and `/tmp/kata_error.log`.
+The location of the http logs is configured in `/var/www/katago-server/gunicoen.conf` .
+The python logs from `katago_server.py` are accessible with 
+
+`$ journalctl -f -u katago-server`
+
+where the `-f` option gives live updates, like `tail -f` .
+
+
+
 === The End ===
