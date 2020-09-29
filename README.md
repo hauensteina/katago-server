@@ -4,7 +4,8 @@ A Back End API To Ask KataGo For Moves
 AHN, Sep 2020
 
 Try it through a front end at https://katagui.herokuapp.com .
-The repo for the fron end is at https://github.com/hauensteina/katago-gui .
+
+The repo for the front end is at https://github.com/hauensteina/katago-gui .
 
 The API is a Flask app, typically running on Ubuntu. Therefore, you probably want 
 to be on a Ubuntu box where the default python is python version 3, which is pretty 
