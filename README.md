@@ -1,66 +1,40 @@
 
 A Back End API To Ask KataGo For Moves
 ===========================================
-AHN, Jan 2020
+AHN, Sep 2020
 
-Try it at https://katagui.herokuapp.com .
+Try it through a front end at https://katagui.herokuapp.com .
+The repo for the fron end is at https://github.com/hauensteina/katago-gui .
 
-katago-gui (the GUI) is a git submodule of katago-server (this repo).
+The API is a Flask app, typically running on Ubuntu. Therefore, you probably want 
+to be on a Ubuntu box where the default python is python version 3, which is pretty 
+much standard these days.
 
-WARNING: You need the katago weights. Get them with
-
+WARNING: You need the katago weights. Get the weights with
 ```
 $ cd katago-server
-$ wget https://github.com/lightvector/KataGo/releases/download/v1.3.1/g170-b20c256x2-s1039565568-d285739972.txt.gz
+$ wget https://github.com/lightvector/KataGo/releases/download/v1.4.5/g170e-b20c256x2-s5303129600-d1228401921.bin.gz
+```
+The weights file must match the one used in `katago_server.py` in the line
+```
+katago_cmd = './katago gtp -model g170e-b20c256x2-s5303129600-d1228401921.bin.gz -config gtp_ahn.cfg '
 ```
 
 To start the back end katago for testing, say
 ```
-$ gunicorn katago_server:app --bind 0.0.0.0:2818 -w 1
+$ python katago_server.py 
 ```
-The production port is 2819.
-
-For testing, use
+This will start a Flask app listening on port 2718. Suppose the IP address
+of your Ubuntu machine is `192.168.0.190`. To hit the API, from any machine 
+on your network, try this:
 ```
-KATAGO_SERVER = 'https://ahaux.com/katago_server_test/'
+curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://192.168.0.190:2718/select-move/katago_gtp_bot
 ```
-in heroku_app.py .
+It should return the ten best follow-up moves in descending quality, a score estimate, and a winning probability.
 
-The katago-gui GUI expects the back end at https://ahaux.com/katago_server .
-The apache2 config on ahaux.com (marfa) forwards katago_server to port 2819:
-```
-$ cat /etc/apache2/sites-available/ahaux.conf
-<VirtualHost *:443>
-    SSLEngine On
-    SSLCertificateFile /etc/ssl/certs/ahaux.com.crt
-    SSLCertificateKeyFile /etc/ssl/private/ahaux.com.key
-    SSLCACertificateFile /etc/ssl/certs/ca-certificates.crt
-
-    ServerAdmin admin@ahaux.com
-    ServerName www.ahaux.com
-    DocumentRoot /var/www/ahaux
-    ErrorLog /var/www/ahaux/log/error.log
-    CustomLog /var/www/ahaux/log/access.log combined
-
-   <Proxy *>
-        Order deny,allow
-          Allow from all
-    </Proxy>
-    ProxyPreserveHost On
-    <Location "/katago_server">
-          ProxyPass "http://127.0.0.1:2819/"
-          ProxyPassReverse "http://127.0.0.1:2819/"
-    </Location>
-
-</VirtualHost>
-```
-
-Point your browser at
-https://katago-gui.herokuapp.com
-
-Deployment Process for katago-server
--------------------------------------
-Log into the server (marfa), then:
+Production Deployment Process for katago-server
+---------------------------------------------------------------
+Log into your server, which probably has a strong GPU. Then:
 
 ```
 $ cd /var/www/katago-server
@@ -93,49 +67,5 @@ Enable the service with
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable katago-server
 ```
-
-Deployment Process for katago-gui (the Web front end)
---------------------------------------------------------------
-
-The heroku push happens through github.
-Log into the server (marfa), then:
-
-```
-$ cd /var/www/katago-server/katago-gui
-$ git pull origin dev
-$ git pull origin master
-<< Change the server address to prod in static/main.js >>
-$ git merge dev
-$ git push origin master
-```
-
-Log out of the server.
-In a local terminal, say
-
-```
-$ heroku logs -t --app katago-gui
-```
-
-to see if things are OK.
-
-Point your browser at
-https://katago-gui.herokuapp.com
-
-CURL testing
-------------------
-
-Prod:
-```
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server/select-move/katago_gtp_bot
-```
-Dev on marfa:
-```
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://www.ahaux.com/katago_server_test/select-move/katago_gtp_bot
-```
-Dev local on marfa:
-```
-$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2818/select-move/katago_gtp_bot
-```
-
 
 === The End ===
