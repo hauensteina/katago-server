@@ -1,2 +1,2 @@
-web: gunicorn katago_server_guest:app -w 1
+web: gunicorn katago_server_eigen:app -w 1
 
