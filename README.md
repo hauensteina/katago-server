@@ -2,6 +2,7 @@
 A Back End API To Ask KataGo For Moves
 ===========================================
 AHN, Sep 2020
+xx
 
 The API is a Python Flask app, typically running on Ubuntu. This distribution also includes an executable for katago, running
 on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, but you have to be on a 64-bit Ubuntu box. The default 
