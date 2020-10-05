@@ -9,4 +9,5 @@ libarchive-dev
 libarchive13
 libjsoncpp-dev
 libjsoncpp1
+librhash
 
