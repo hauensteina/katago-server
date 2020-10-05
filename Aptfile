@@ -5,4 +5,5 @@ zlib1g-dev
 libzip-dev
 libboost-all-dev
 libarchive-tools
+libarchive-dev
 
