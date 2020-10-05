@@ -7,4 +7,5 @@ libboost-all-dev
 libarchive-tools
 libarchive-dev
 libarchive13
+libjsoncpp-dev
 
