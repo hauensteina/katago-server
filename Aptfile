@@ -6,4 +6,5 @@ libzip-dev
 libboost-all-dev
 libarchive-tools
 libarchive-dev
+libarchive13
 
