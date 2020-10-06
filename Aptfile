@@ -3,7 +3,7 @@
 #libeigen3-dev
 #zlib1g-dev
 #libzip-dev
-#libboost-all-dev
+libboost-all-dev
 #libarchive13
 #libjsoncpp1
 
