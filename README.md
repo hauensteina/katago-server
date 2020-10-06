@@ -261,8 +261,10 @@ $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: applicati
 $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST https://my-katago-server.herokuapp.com/score/katago_gtp_bot
 ```
 
-After about ten seconds, you should get some json output with moves and probabilities.
+After a second or two, you should get some json output with moves and probabilities.
+
 If you got this far and it works, congratulations!
+
 You might want to look at https://github.com/hauensteina/katago-gui.git to see if you can get the front end to run
 with katago-server.
 
