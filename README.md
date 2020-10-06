@@ -138,7 +138,8 @@ The pull the code for the project to your local file system:
 `$ git pull github master`
 
 A ten block network is included. Things will be slow, and a small network will be faster. It is stronger than you think.
-The weights are in `g170e-b10c128-s1141046784-d204142634.bin.gz`.
+The weights are in `g170e-b10c128-s1141046784-d204142634.bin.gz`. We run the net with only one thread and 8 playouts, 
+configured in `gtp_ahn_eigen.cfg`.
 
 Make sure you are on python 3:
 
