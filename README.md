@@ -89,7 +89,7 @@ because this is cool. It will also be helpful if you want to play around with th
 end available at `https://github.com/hauensteina/katago-gui.git`.
 
 Heroku runs Ubuntu, and therefore our katago_eigen binary should just work as is.
-You also need to be on Ubuntu to follow the steps given below. If you aren't, get yourself
+You also need to be on Ubuntu yourself to follow the steps given below. If you aren't, get yourself
 a virtual Ubuntu like so:
 
 https://brb.nci.nih.gov/seqtools/installUbuntu.html
