@@ -11,8 +11,8 @@
 #
 
 from pdb import set_trace as BP
+
 import os, sys, re
-import numpy as np
 import signal
 import time
 
@@ -20,12 +20,9 @@ import subprocess
 from threading import Thread,Lock,Event
 import atexit
 
-import goboard_fast as goboard
-from agent_base import Agent
-from agent_helpers import is_point_an_eye
-from goboard_fast import Move
-from gotypes import Point, Player
-from go_utils import point_from_coords
+#from agent_base import Agent
+#from goboard_fast import Move
+#from go_utils import point_from_coords
 
 g_response = None
 g_handler_lock = Lock()
@@ -37,7 +34,7 @@ g_best_ten = []
 
 MOVE_TIMEOUT = 20 # seconds
 #===========================
-class KataGTPBot( Agent):
+class KataGTPBot:
     # Listen on a stream in a separate thread until
     # a line comes in. Process line in a callback.
     #=================================================
@@ -64,7 +61,6 @@ class KataGTPBot( Agent):
 
     #--------------------------------------
     def __init__( self, katago_cmdline):
-        Agent.__init__( self)
         self.katago_cmdline = katago_cmdline
         self.last_move_color = ''
 
@@ -112,7 +108,7 @@ class KataGTPBot( Agent):
             resp = line.split('=')[1].strip()
             if resp:
                 print( '<## ' + resp)
-                g_response = self._resp2Move( resp)
+                g_response = resp # self._resp2Move( resp)
                 if g_response:
                     g_response_event.set()
         elif ' PSV ' in line: # Move candidates in descending order of PSV
@@ -148,19 +144,6 @@ class KataGTPBot( Agent):
             time.sleep(1)
             print( 'Katago resurrected')
 
-    # Convert Katago response string to a Move we understand
-    #---------------------------------------------------------
-    def _resp2Move( self, resp):
-        res = None
-        if 'pass' in resp:
-            res = Move.pass_turn()
-        elif 'resign' in resp:
-            res = Move.resign()
-        elif len(resp.strip()) in (2,3):
-            p = point_from_coords( resp)
-            res = Move.play( p)
-        return res
-
     # Send a command to katago
     #-----------------------------
     def _katagoCmd( self, cmdstr):
@@ -171,9 +154,9 @@ class KataGTPBot( Agent):
         p.stdin.flush()
         #print( '--> ' + cmdstr)
 
-    # Override Agent.select_move()
-    #--------------------------------------------------------
-    def select_move( self, game_state, moves, config = {}):
+    # select-move endpoint implementation
+    #--------------------------------------------------------------------
+    def select_move( self, moves, config = {}):
         global g_win_prob
         global g_response
         global g_response_event
@@ -212,7 +195,7 @@ class KataGTPBot( Agent):
             self._error_handler()
             return None
         #time.sleep(2)
-        print( 'response: ' + str(g_response))
+        #print( 'response: ' + str(g_response))
         if g_response:
             res = g_response
             #print( '>>>>>>>>> clearing event')
@@ -223,7 +206,7 @@ class KataGTPBot( Agent):
 
     # score endpoint implementation
     #---------------------------------------------------
-    def score( self, game_state, moves, config = {}):
+    def score( self, moves, config = {}):
         global g_response
         global g_response_event
         res = None
@@ -289,16 +272,9 @@ class KataGTPBot( Agent):
         print( '>>>>>>>>> komi:%f',komi)
         self._katagoCmd( 'komi %f' % komi)
 
-    # Override Agent.diagnostics()
     #------------------------------
     def diagnostics( self):
         global g_win_prob
         global g_score
         global g_best_ten
         return { 'winprob': float(g_win_prob), 'score': float(g_score), 'bot_move': g_bot_move, 'best_ten': g_best_ten }
-
-    # Turn an idx 0..360 into a move
-    #---------------------------------
-    def _idx2move( self, idx):
-        point = self.encoder.decode_point_index( idx)
-        return goboard.Move.play( point)
