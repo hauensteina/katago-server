@@ -33,49 +33,6 @@ The API is used by a front end at https://katagui.herokuapp.com .
 
 The repo for the front end is at https://github.com/hauensteina/katago-gui .
 
-Production Deployment Process for katago-server
----------------------------------------------------------------
-Log into your Ubuntu server, which hopefully has a strong GPU. Then:
-```
-$ cd /var/www
-$ git clone https://github.com/hauensteina/katago-server.git
-```
-
-Configure katago-server as a service in `/etc/systemd/system/katago-server.service` :
-
-```
-[Unit]
-Description=katago-server
-After=network.target
-
-[Service]
-User=<you-user-name>
-Restart=on-failure
-WorkingDirectory=/var/www/katago-server
-ExecStart=<your-home-dir>/miniconda/envs/venv-dlgo/bin/gunicorn -c /var/www/katago-server/gunicorn.conf -b 0.0.0.0:2819 -w 1 katago_server:app
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable the service with
-```
-$ sudo systemctl daemon-reload
-$ sudo systemctl enable katago-server
-```
-
-Start the service:
-```
-$ sudo systemctl start katago-server
-```
-
-The http access and error logs are in `/tmp/kata_access.log` and `/tmp/kata_error.log`.
-The location of the http logs is configured in `/var/www/katago-server/gunicorn.conf` .
-The python logs from `katago_server.py` are accessible with 
-
-`$ journalctl -f -u katago-server`
-
-where the `-f` option gives live updates, like `tail -f` .
 
 Running katago-server on Heroku, just for kicks
 -------------------------------------------------------
@@ -268,6 +225,51 @@ If you got this far and it works, congratulations!
 You might want to look at https://github.com/hauensteina/katago-gui.git to see if you can get the front end to run
 with katago-server.
 
+
+
+Production Deployment Process for katago-server
+---------------------------------------------------------------
+Log into your Ubuntu server, which hopefully has a strong GPU. Then:
+```
+$ cd /var/www
+$ git clone https://github.com/hauensteina/katago-server.git
+```
+
+Configure katago-server as a service in `/etc/systemd/system/katago-server.service` :
+
+```
+[Unit]
+Description=katago-server
+After=network.target
+
+[Service]
+User=<you-user-name>
+Restart=on-failure
+WorkingDirectory=/var/www/katago-server
+ExecStart=<your-home-dir>/miniconda/envs/venv-dlgo/bin/gunicorn -c /var/www/katago-server/gunicorn.conf -b 0.0.0.0:2819 -w 1 katago_server:app
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable the service with
+```
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable katago-server
+```
+
+Start the service:
+```
+$ sudo systemctl start katago-server
+```
+
+The http access and error logs are in `/tmp/kata_access.log` and `/tmp/kata_error.log`.
+The location of the http logs is configured in `/var/www/katago-server/gunicorn.conf` .
+The python logs from `katago_server.py` are accessible with 
+
+`$ journalctl -f -u katago-server`
+
+where the `-f` option gives live updates, like `tail -f` .
 
 
 === The End ===
