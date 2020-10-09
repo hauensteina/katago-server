@@ -4,7 +4,7 @@ A Back End API To Ask KataGo For Moves
 AHN, Sep 2020
 
 The API is a Python Flask app, typically running on Ubuntu. This distribution includes an executable for katago, running
-on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, but you have to be on a 64-bit Ubuntu box. The default 
+on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, as long as you are on a 64-bit Ubuntu box. The default 
 Python has to be Python 3, which is pretty much standard these days.
 ```
 $ git clone https://github.com/hauensteina/katago-server.git
@@ -24,7 +24,12 @@ To start the back end katago for testing, say
 ```
 $ python katago_server.py 
 ```
-This will start a Flask app listening on port 2718. To hit the API, from a second terminal, 
+This will start a Flask app listening on port 2718. 
+
+If you get error messages about missing libraries, `sudo apt install <library-package>` is your friend.
+Google will tell you which packages you need.
+
+To hit the API, from a second terminal, 
 try this:
 ```
 curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2718/select-move/katago_gtp_bot
