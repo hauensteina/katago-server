@@ -159,9 +159,7 @@ Activate the venv:
 Install additional packages into the venv:
 
 ```
-$ pip install numpy
 $ pip install flask
-$ pip install six
 $ pip install gunicorn
 ```
 

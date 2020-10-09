@@ -10,7 +10,6 @@
 #
 
 import os
-import numpy as np
 from datetime import datetime
 
 from flask import Flask
