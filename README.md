@@ -24,13 +24,17 @@ To start the back end katago for testing, say
 ```
 $ python katago_server.py 
 ```
-This will start a Flask app listening on port 2718. Suppose the IP address
-of your Ubuntu machine is `192.168.0.190`. To hit the API, from any machine 
-on your network, try this:
+This will start a Flask app listening on port 2718. To hit the API, from a second terminal, 
+try this:
 ```
-curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://192.168.0.190:2718/select-move/katago_gtp_bot
+curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2718/select-move/katago_gtp_bot
 ```
 It should return the ten best follow-up moves in descending quality, a score estimate, and a winning probability.
+
+If you want a territory map, use this:
+```
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2718/score/katago_gtp_bot
+```
 
 The API is used by a front end at https://katagui.herokuapp.com .
 
