@@ -6,10 +6,13 @@ AHN, Sep 2020
 The API is a Python Flask app, typically running on Ubuntu. This distribution also includes an executable for katago, running
 on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, but you have to be on a 64-bit Ubuntu box. The default 
 Python has to be Python 3, which is pretty much standard these days.
+```
+$ git clone https://github.com/hauensteina/katago-server.git
+$ cd katago-server
+```
 
 WARNING: You still need the katago weights from elsewhere. Get them with
 ```
-$ cd katago-server
 $ wget https://github.com/lightvector/KataGo/releases/download/v1.4.5/g170e-b20c256x2-s5303129600-d1228401921.bin.gz
 ```
 The weights file must match the one used in `katago_server.py` in the line
