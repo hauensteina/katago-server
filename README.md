@@ -21,15 +21,6 @@ $ git clone https://github.com/hauensteina/katago-server.git
 $ cd katago-server
 ```
 
-WARNING: You still need the katago weights from elsewhere. Get them with
-```
-$ wget https://github.com/lightvector/KataGo/releases/download/v1.4.5/g170e-b20c256x2-s5303129600-d1228401921.bin.gz
-```
-The weights file must match the one used in `katago_server.py` in the line
-```
-katago_cmd = './katago gtp -model g170e-b20c256x2-s5303129600-d1228401921.bin.gz -config gtp_ahn.cfg '
-```
-
 To start the back end katago for testing, say
 ```
 $ python katago_server.py 
