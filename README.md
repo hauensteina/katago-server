@@ -6,7 +6,7 @@ AHN, Sep 2020
 What is this
 ---------------
 
-Katago-server is the back end for https://github.com/hauensteina/katago-gui .
+Katago-server is the back end for https://github.com/hauensteina/katagui .
 
 Katago-server exposes a REST-API implemented as a Python Flask app. This repo includes an executable for katago, running
 on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, as long as 
@@ -44,7 +44,7 @@ $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: applicati
 
 The API is used by a front end at https://katagui.herokuapp.com .
 
-The repo for the front end is at https://github.com/hauensteina/katago-gui .
+The repo for the front end is at https://github.com/hauensteina/katagui .
 
 
 Running katago-server on Heroku, just for kicks
@@ -56,7 +56,7 @@ among other things. And best of all, if you do not have a lot of traffic, it is 
 The drawback of Heroku is compute power. There is no GPU, and no hardware acceleration,
 so KataGo will be quite slow. We will deploy to Heroku anyway, just because we can and
 because this is cool. It will also be helpful if you want to play around with the front
-end available at `https://github.com/hauensteina/katago-gui.git`.
+end available at `https://github.com/hauensteina/katagui.git`.
 
 Heroku runs Ubuntu, and therefore our katago_eigen binary should just work as is.
 You also need to be on Ubuntu yourself to follow the steps given below. If you aren't, get yourself
@@ -233,7 +233,7 @@ After a second or two, you should get some json output with moves and probabilit
 
 If you got this far and it works, congratulations! Drop me a note at hauensteina@gmail.com .
 
-You might want to look at https://github.com/hauensteina/katago-gui.git to see if you can get the front end to run
+You might want to look at https://github.com/hauensteina/katagui.git to see if you can get the front end to run
 with katago-server.
 
 
