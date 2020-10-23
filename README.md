@@ -231,7 +231,7 @@ $ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: applicati
 
 After a second or two, you should get some json output with moves and probabilities.
 
-If you got this far and it works, congratulations!
+If you got this far and it works, congratulations! Drop me a note at hauenstein@gmail.com .
 
 You might want to look at https://github.com/hauensteina/katago-gui.git to see if you can get the front end to run
 with katago-server.
