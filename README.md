@@ -8,7 +8,7 @@ What is this
 
 Katago-server is the back end for https://github.com/hauensteina/katago-gui .
 
-Katago -server exposes a REST-API implemented as a Python Flask app. This repo includes an executable for katago, running
+Katago-server exposes a REST-API implemented as a Python Flask app. This repo includes an executable for katago, running
 on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, as long as 
 you are on a 64-bit Ubuntu box. The default Python has to be Python 3, which is pretty 
 much standard these days.
