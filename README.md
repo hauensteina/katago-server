@@ -8,7 +8,7 @@ What is this
 
 Katago-server is the back end for https://github.com/hauensteina/katagui .
 
-Katago-server exposes a REST-API implemented as a Python Flask app. This repo includes an executable for katago, running
+Katago-server exposes a REST API implemented as a Python Flask app. This repo includes an executable for katago, running
 on 64-bit Ubuntu. Therefore, you do not have to look for katago elsewhere, as long as 
 you are on a 64-bit Ubuntu box. The default Python has to be Python 3, which is pretty 
 much standard these days.
@@ -33,7 +33,7 @@ Google will tell you which packages you need.
 To hit the API, from a second terminal, 
 try this:
 ```
-curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2718/select-move/katago_gtp_bot
+$ curl -d '{"board_size":19, "moves":["R4", "D16"]}' -H "Content-Type: application/json" -X POST http://127.0.0.1:2718/select-move/katago_gtp_bot
 ```
 It should return the ten best follow-up moves in descending quality, a score estimate, and a winning probability.
 
