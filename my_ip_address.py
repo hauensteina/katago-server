@@ -14,7 +14,7 @@
 import sys, os, time
 
 while(1):
-    tt = os.popen( 'curl "https://katagui.herokuapp.com/server_ip?pwd=%s"' % sys.argv[1])
+    tt = os.popen( 'curl "https://katagui-club.herokuapp.com/server_ip?pwd=%s"' % sys.argv[1])
     tt.read()
     tt.close()
     time.sleep( 60)
