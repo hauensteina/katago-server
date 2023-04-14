@@ -172,7 +172,7 @@ class KataGTPBot:
         self._katagoCmd( 'clear_board')
         self._katagoCmd( 'clear_cache')
 
-        self.set_rules(komi)
+        self.set_rules(komi, config)
 
         # Make the moves
         color = 'b'
@@ -223,7 +223,7 @@ class KataGTPBot:
         self._katagoCmd( 'clear_board')
         self._katagoCmd( 'clear_cache')
 
-        self.set_rules(komi)
+        self.set_rules(komi, config)
 
         # Make the moves
         color = 'b'
@@ -255,8 +255,8 @@ class KataGTPBot:
         print( 'katago says: %s' % str(res))
         return res
 
-    #----------------------------
-    def set_rules( self, komi):
+    #-------------------------------------
+    def set_rules( self, komi, config={}):
         # Rules should be jap for integer komi or even komi,
         # chinese for odd komi
         if not komi: komi=0
@@ -264,6 +264,9 @@ class KataGTPBot:
         if komi != int(komi): # komi == n.5
             if (komi - 0.5) % 2: # 7.5, not 6.5
                 rules = 'chinese'
+        # Kifu Cam always uses chinese rules        
+        if config.get('client','') == 'kifucam':
+            rules = 'chinese'
         self._katagoCmd( 'kata-set-rules ' + rules)
 
     #---------------------------
