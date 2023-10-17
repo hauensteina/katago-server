@@ -92,7 +92,7 @@ class KataGTPBot:
 
         line = katago_response
         print( 'kata resp: %s' % line)
-        if g_win_prob < 0 and 'CHAT:' in line: # Winrate
+        if g_win_prob < 0 and 'MALKOVICH:' in line: # Winrate
             print( '<-- ' + line)
             g_best_ten = []
             rstr = re.findall( r'Winrate\s+[^\s]+\s+', line)[0] # 'Winrate 44.37% '
@@ -194,8 +194,8 @@ class KataGTPBot:
             print( 'error: katago select response timeout')
             self._error_handler()
             return None
-        #time.sleep(2)
-        #print( 'response: ' + str(g_response))
+        time.sleep(3)
+        print( 'response: ' + str(g_response))
         if g_response:
             res = g_response
             #print( '>>>>>>>>> clearing event')
