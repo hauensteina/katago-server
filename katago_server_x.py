@@ -13,7 +13,7 @@ from katago_gtp_bot import KataGTPBot
 from get_bot_app import get_bot_app
 
 #katago_cmd = './katago gtp -model g170-b40c256x2-s5095420928-d1229425124.bin.gz -config gtp_ahn_x.cfg '
-katago_cmd = './katago gtp -model  kata1-b40c256-s9435250176-d2296927197.bin.gz -config gtp_ahn_x.cfg '
+katago_cmd = './katago gtp -model  kata1-b18c384nbt-s9131461376-d4087399203.bin.gz -config gtp_ahn_x.cfg '
 katago_gtp_bot = KataGTPBot( katago_cmd.split() )
 
 # Get an app with 'select-move/<botname>' endpoints
