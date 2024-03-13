@@ -92,7 +92,7 @@ class KataGTPBot:
 
         line = katago_response
         print( 'kata resp: %s' % line)
-        if g_win_prob < 0 and 'CHAT:' in line: # Winrate
+        if g_win_prob < 0 and ('CHAT:' in line or 'MALKOVICH:' in line): # Winrate
             print( '<-- ' + line)
             g_best_ten = []
             rstr = re.findall( r'Winrate\s+[^\s]+\s+', line)[0] # 'Winrate 44.37% '
