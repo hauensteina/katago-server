@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # /********************************************************************
-# Filename: katago_server.py
+# Filename: katago_server_x.py
 # Author: AHN
 # Creation Date: Jan, 2020
 # **********************************************************************/
