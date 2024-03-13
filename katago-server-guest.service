@@ -1,0 +1,16 @@
+[Unit]
+Description=katago-server-guest
+After=network.target
+
+[Service]
+Environment="LD_LIBRARY_PATH=/home/andreas/opt/lib:$LD_LIBRARY_PATH:/usr/local/cuda-12.4/lib64:/home/andreas/katago/TensorRT-8.6.1.6/lib"
+User=andreas
+Restart=on-failure
+WorkingDirectory=/var/www/katago-server
+ExecStart=/home/andreas/miniconda3/envs/venv-dlgo/bin/gunicorn --limit-request-line 8192 -c /var/www/katago-server/gunicorn_guest.py -b 0.0.0.0:2821 -w 1 katago_server_guest:app
+
+[Install]
+WantedBy=multi-user.target
+
+
+
