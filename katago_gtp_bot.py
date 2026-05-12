@@ -32,7 +32,7 @@ g_score = 0
 g_bot_move = ''
 g_best_ten = []
 
-MOVE_TIMEOUT = 20 # seconds
+MOVE_TIMEOUT = 40 # seconds
 #===========================
 class KataGTPBot:
     # Listen on a stream in a separate thread until
